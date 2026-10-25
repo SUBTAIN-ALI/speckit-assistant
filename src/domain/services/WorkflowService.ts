@@ -300,6 +300,20 @@ export class WorkflowService implements WorkflowUseCases {
     return state;
   }
 
+  // Flags a feature phase and the approved phases after it as out of date —
+  // e.g. when the requirements a spec was generated from change. No-op for a
+  // phase that hasn't produced anything yet.
+  async markStale(workspacePath: string, phase: WorkflowPhase, featureName: string): Promise<WorkflowState> {
+    const state = await this.workspaceRepo.getWorkflowState(workspacePath);
+    const ps = this.findPhase(state, phase, featureName);
+    if (ps && ps.status !== 'idle') {
+      ps.stale = true;
+      this.markDownstreamStale(state, phase, featureName);
+      await this.workspaceRepo.saveWorkflowState(workspacePath, state);
+    }
+    return state;
+  }
+
   async writeStdin(phase: WorkflowPhase, featureName: string | null, text: string, personaId?: PersonaId): Promise<boolean> {
     return this.agentRunner.writeStdin(phase, featureName, text, personaId);
   }

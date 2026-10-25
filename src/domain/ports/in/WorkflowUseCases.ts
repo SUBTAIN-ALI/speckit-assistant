@@ -22,6 +22,7 @@ export interface WorkflowUseCases {
     onData?: (text: string) => void
   ): Promise<WorkflowState>;
   approvePhase(workspacePath: string, phase: WorkflowPhase, featureName: string | null): Promise<WorkflowState>;
+  markStale(workspacePath: string, phase: WorkflowPhase, featureName: string): Promise<WorkflowState>;
   discardPhase(workspacePath: string, phase: WorkflowPhase, featureName: string | null): Promise<WorkflowState>;
   toggleTask(workspacePath: string, featureName: string, lineIndex: number, checked: boolean): Promise<WorkflowState>;
   readFile(workspacePath: string, filePath: string): Promise<string>;

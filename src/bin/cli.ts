@@ -131,7 +131,9 @@ function startWebServer() {
     process.exit(1);
   }
 
-  const child = spawn(process.execPath, [nextBin, 'start', '-p', port], {
+  // Bind to loopback only: the API can spawn agent CLIs and holds the user's
+  // API keys / Zoom tokens, so it must not be reachable from the network.
+  const child = spawn(process.execPath, [nextBin, 'start', '-p', port, '-H', '127.0.0.1'], {
     cwd: appDir,
     stdio: 'inherit',
     env: {

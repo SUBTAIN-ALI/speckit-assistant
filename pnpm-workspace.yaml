@@ -1,0 +1,9 @@
+allowBuilds:
+  # Native terminal backend; must compile against the local Node ABI.
+  node-pty: true
+  # Both ship prebuilt platform binaries via optional deps; install scripts are unnecessary.
+  esbuild: false
+  sharp: false
+  # No-op preinstall echo / version-warning postinstall; nothing to build.
+  "@google/genai": false
+  protobufjs: false

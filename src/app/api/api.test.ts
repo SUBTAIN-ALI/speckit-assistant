@@ -24,7 +24,7 @@ function copyDirSync(src: string, dest: string) {
 }
 
 describe('Next.js API Routes - E2E Integration Tests', () => {
-  const demoPath = path.resolve(__dirname, '../../../../speckit-demo');
+  const demoPath = path.resolve(__dirname, '../../../test/fixtures/speckit-demo');
   const tempPath = path.resolve(__dirname, 'tmp-api-test-workspace');
 
   beforeAll(() => {
@@ -289,7 +289,10 @@ describe('Next.js API Routes - E2E Integration Tests', () => {
       return buffer;
     })();
 
-    // Perform the write to trigger chokidar
+    // Perform the write to trigger chokidar. chokidar's initial scan is async and
+    // the route doesn't expose its 'ready' event, so give it a moment first —
+    // writing immediately races the scan and the change is never reported.
+    await new Promise(r => setTimeout(r, 500));
     fs.writeFileSync(dummyFilePath, originalContent + '\n\n<!-- dummy change -->');
 
     try {

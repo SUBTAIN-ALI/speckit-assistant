@@ -18,7 +18,7 @@ function copyDirSync(src: string, dest: string) {
 }
 
 describe('FSWorkspaceRepository - Demo Integration Test', () => {
-  const demoPath = path.resolve(__dirname, '../../../../../speckit-demo');
+  const demoPath = path.resolve(__dirname, '../../../../test/fixtures/speckit-demo');
   const tempPath = path.resolve(__dirname, 'tmp-test-workspace');
 
   beforeEach(() => {

@@ -1,9 +1,9 @@
 import { WorkflowPhase, CostMetadata } from './types';
 
 // Every tracked agent run that this process orchestrates: a workflow phase, a
-// review-gate persona, or an on-demand DevOps agent. (Spec-agent hook runs happen
+// review-gate persona, an on-demand DevOps agent, or a meeting → requirements import. (Spec-agent hook runs happen
 // inside the specify CLI subprocess and are not individually tracked here.)
-export type ExecutionKind = 'phase' | 'persona' | 'devops';
+export type ExecutionKind = 'phase' | 'persona' | 'devops' | 'meeting';
 
 export type ExecutionStatus =
   | 'running' // process spawned, not yet exited

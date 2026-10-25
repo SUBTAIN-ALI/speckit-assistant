@@ -290,6 +290,24 @@ export class FSWorkspaceRepository implements WorkspaceRepositoryPort {
     fs.writeFileSync(absolutePath, content, 'utf-8');
   }
 
+  async listDirectories(workspacePath: string, dirPath: string): Promise<string[]> {
+    const absolutePath = path.resolve(workspacePath, dirPath);
+    if (!this.isPathSafe(workspacePath, absolutePath)) {
+      throw new Error('Access denied: Path is outside the workspace directory.');
+    }
+    if (!fs.existsSync(absolutePath)) return [];
+    return fs.readdirSync(absolutePath, { withFileTypes: true }).filter(e => e.isDirectory()).map(e => e.name).sort();
+  }
+
+  async deleteDirectory(workspacePath: string, dirPath: string): Promise<void> {
+    const absolutePath = path.resolve(workspacePath, dirPath);
+    // Never the workspace root itself, only something inside it.
+    if (!this.isPathSafe(workspacePath, absolutePath) || absolutePath === path.resolve(workspacePath)) {
+      throw new Error('Access denied: Path is outside the workspace directory.');
+    }
+    fs.rmSync(absolutePath, { recursive: true, force: true });
+  }
+
   // Read all .md files (one level deep) from a directory, sorted by filename,
   // returning their absolute path and content.
   private readMarkdownDir(dir: string): { path: string; content: string }[] {

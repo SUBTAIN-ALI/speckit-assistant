@@ -28,9 +28,10 @@
 5. [Installation & Setup](#-installation--setup)
 6. [How to Publish to npmjs](#-how-to-publish-to-npmjs)
 7. [CLI Usage](#-cli-usage)
-8. [Workspace Anatomy](#-workspace-anatomy)
-9. [Testing & Quality Assurance](#-testing--quality-assurance)
-10. [License](#-license)
+8. [Meeting → Requirements (Zoom)](#-meeting--requirements-zoom)
+9. [Workspace Anatomy](#-workspace-anatomy)
+10. [Testing & Quality Assurance](#-testing--quality-assurance)
+11. [License](#-license)
 
 ---
 
@@ -107,6 +108,7 @@ For a detailed analysis of our architectural decisions, read our **Architecture 
 
 * [ADR 001: Hexagonal Architecture (Ports and Adapters)](docs/adr-001-hexagonal-architecture.md)
 * [ADR 002: State Synchronization and Agent Dispatch](docs/adr-002-state-sync-and-agent-dispatch.md)
+* [ADR 003: Meeting → Requirements via Zoom MCP and user-provided AI keys](docs/adr-003-meeting-requirements.md)
 
 ---
 
@@ -233,6 +235,45 @@ SpecKit Assistant comes with a powerful CLI. When installed globally, you can in
 * `-p, --port <number>`: Override the default port `18080` for the Web UI.
 * `--agent <type>`: AI agent execution binary (default: `claude`).
 * `--prompt <text>`: Feed specific refinements or custom instructions to the AI agent.
+
+---
+
+## 🎙️ Meeting → Requirements (Zoom)
+
+The **Requirements** section is the front of the SDD flow: it turns a recorded Zoom meeting (or an uploaded transcript) into requirements you can edit, accept/reject, reorder and delete — and then into Spec Kit features.
+
+```
+Zoom link ─► Zoom MCP server (transcript + AI summary) ─► your AI provider (structured JSON)
+          ─► requirement list (.specify/meetings/<date-topic>/requirements.md) ─► review
+          ─► Create features: AI-suggested grouping you review ─► specs/NNN-name/
+          ─► Specify phase: your agent CLI runs /speckit.specify with the requirements ─► spec.md
+          ─► Workflow: clarify → plan → tasks → implement
+```
+
+**Create features** (needs Spec Kit initialized in the workspace and an agent selected under *Agents*): select the accepted requirements, let the AI suggest how to split them into features (or put everything in one), adjust names and membership, then create. Each feature gets a Spec Kit-numbered folder, a committed copy of its requirements (`specs/NNN-name/requirements.md`), and a `spec.md` written by Spec Kit with REQ IDs kept for traceability. Open questions become `[NEEDS CLARIFICATION]` items for the Clarify phase. Editing a requirement that is already part of a feature updates that copy and marks the feature's spec as stale.
+
+**Setup (Requirements → Settings)**
+
+1. **AI provider** — pick OpenAI, Anthropic (Claude) or Google (Gemini) and paste your own API key. *Test key* checks it and lists the models you can use. `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` and `GEMINI_API_KEY` are also honored.
+2. **Zoom** (optional — uploads work without it). Zoom's MCP server only accepts registered OAuth apps, so each user creates their own:
+   - In the [Zoom App Marketplace](https://marketplace.zoom.us/develop/create), create a **General App** with **user-managed** OAuth.
+   - Zoom only accepts **public https** redirect URLs (it rejects `localhost` and `127.0.0.1`), so expose the callback through a tunnel, e.g. `ngrok http 3000` (a free static ngrok domain keeps the URL stable) or `cloudflared tunnel --url http://127.0.0.1:3000`. Use port 18080 when running via the CLI. Only `GET /api/integrations/zoom/callback` is served through the tunnel; everything else stays local-only.
+   - Paste the tunnel's https address into **Public callback URL** in Settings and save. Then copy the redirect URL shown there (e.g. `https://your-name.ngrok-free.app/api/integrations/zoom/callback`) into both **OAuth Redirect URL** and **OAuth Allow List** on the Zoom app.
+   - Add the read-only scopes `meeting:read:search`, `meeting:read:assets`, `cloud_recording:read:list_user_recordings`, `cloud_recording:read:content`.
+   - Paste the Client ID / Secret, save, and click **Connect Zoom**. *Test connection* lists the server's tools.
+
+**What can be imported:** past meetings in your Zoom account that had cloud recording with audio transcript, or AI Companion summaries. Recording share links and personal-room links can't be resolved through Zoom — download the transcript (`.vtt`) and upload it instead.
+
+**Where things are stored**
+
+| What | Where |
+| --- | --- |
+| API keys, Zoom client secret & tokens | `~/.speckit-assistant/credentials.json` (mode `0600`, never in the workspace, never sent to the browser) |
+| Transcript, summary, raw Zoom/LLM output | `.specify/meetings/<list>/` (local) |
+| Requirement list (source of truth, hand-editable) | `.specify/meetings/<list>/requirements.md` (local) |
+| A feature's source requirements | `specs/NNN-name/requirements.md` (committed with its spec) |
+
+`.specify/meetings/` is added to the workspace `.gitignore` on first import, so meeting data stays local. Each import is listed in **Workflow → Executions** with token usage and an estimated cost.
 
 ---
 

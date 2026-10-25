@@ -29,6 +29,8 @@ import McpPanel from '@/components/McpPanel';
 import ExtensionsPanel, { type ExtensionAction } from '@/components/ExtensionsPanel';
 import AboutModal, { APP_VERSION } from '@/components/AboutModal';
 import ExecutionsView from '@/components/ExecutionsView';
+import RequirementsSection from '@/components/RequirementsSection';
+import { isWorkflowState } from '@/lib/workflowState';
 import { AgentsFile, DEFAULT_AGENTS, toAgentConfig, activeAgent } from '@/domain/models/agents';
 import { McpFile, DEFAULT_MCP } from '@/domain/models/mcp';
 import { SpecAgentsFile, DEFAULT_SPEC_AGENTS } from '@/domain/models/specAgents';
@@ -55,7 +57,8 @@ import {
   Bot,
   Plug,
   Package,
-  Activity
+  Activity,
+  ClipboardList
 } from 'lucide-react';
 
 const PHASE_LABELS: Record<WorkflowPhase, string> = {
@@ -71,12 +74,16 @@ const PHASE_LABELS: Record<WorkflowPhase, string> = {
 };
 
 export default function Dashboard() {
-  const [state, setState] = useState<WorkflowState | null>(null);
+  const [state, setStateRaw] = useState<WorkflowState | null>(null);
+  const setState = (next: unknown) => {
+    if (isWorkflowState(next)) setStateRaw(next);
+    else console.error('Ignoring invalid workflow state from the API:', next);
+  };
   const agentConsoleRef = React.useRef<AgentConsoleHandle | null>(null);
   const [selectedFile, setSelectedFile] = useState<{ path: string; content: string } | null>(null);
   
   const [viewMode, setViewMode] = useState<'kanban' | 'dag' | 'executions'>('kanban');
-  const [section, setSection] = useState<'workflow' | 'agents' | 'mcp' | 'extensions'>('workflow');
+  const [section, setSection] = useState<'workflow' | 'requirements' | 'agents' | 'mcp' | 'extensions'>('workflow');
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [agentConfig, setAgentConfig] = useState<AgentConfig>({
     agentType: 'claude',
@@ -111,6 +118,12 @@ export default function Dashboard() {
       return nextVal;
     });
   };
+
+  // Deep link into a section, e.g. the Zoom OAuth callback's ?section=requirements.
+  useEffect(() => {
+    const s = new URLSearchParams(window.location.search).get('section');
+    if (s === 'requirements') setSection('requirements');
+  }, []);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -895,6 +908,7 @@ export default function Dashboard() {
           <div className="flex items-center bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-0.5">
             {([
               { id: 'workflow', label: 'Workflow', icon: <LayoutGrid size={13} /> },
+              { id: 'requirements', label: 'Requirements', icon: <ClipboardList size={13} /> },
               { id: 'agents', label: 'Agents', icon: <Bot size={13} /> },
               { id: 'mcp', label: 'MCP Tools', icon: <Plug size={13} /> },
               { id: 'extensions', label: 'Extensions', icon: <Package size={13} /> },
@@ -989,6 +1003,19 @@ export default function Dashboard() {
             onEditPersona={setEditingPersona}
             onApply={handleApplyMcp}
             onApplySpecAgents={handleApplySpecAgents}
+          />
+        )}
+
+        {section === 'requirements' && (
+          <RequirementsSection
+            agentConfig={agentConfig}
+            agentLabel={activeAgent(agentsFile)?.name ?? agentConfig.agentType}
+            onStateChange={setState}
+            onOpenFeature={async (name) => {
+              await fetchState();
+              setSection('workflow');
+              await handleSelectFeature(name);
+            }}
           />
         )}
 
