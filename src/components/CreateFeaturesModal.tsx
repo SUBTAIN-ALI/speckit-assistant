@@ -27,6 +27,9 @@ type Step = 'select' | 'review' | 'run';
 type RunStatus = { feature: string; title: string; state: 'pending' | 'running' | 'ok' | 'failed'; message?: string; log: string };
 
 const MAX_LOG = 6000;
+// Claude Code's first-run confirmation for --permission-mode bypassPermissions
+// (PTY output often loses the spaces, hence \s*).
+const BYPASS_PROMPT = /bypass\s*permissions\s*mode[\s\S]*accept/i;
 
 export const CreateFeaturesModal: React.FC<Props> = ({
   isOpen, setId, doc, agentConfig, agentLabel, llmLabel, retryFeature, onClose, onFinished, onOpenFeature,
@@ -41,7 +44,6 @@ export const CreateFeaturesModal: React.FC<Props> = ({
   const [unassigned, setUnassigned] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [warning, setWarning] = useState<string | null>(null);
   const [runs, setRuns] = useState<RunStatus[]>([]);
   const [finished, setFinished] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
@@ -49,7 +51,6 @@ export const CreateFeaturesModal: React.FC<Props> = ({
   useEffect(() => {
     if (!isOpen) return;
     setError(null);
-    setWarning(null);
     setFinished(false);
     setRuns([]);
     if (retryFeature) {
@@ -148,8 +149,7 @@ export const CreateFeaturesModal: React.FC<Props> = ({
         throw new Error(data.error || `Request failed (${res.status})`);
       }
       await readSse(res, (name, data) => {
-        if (name === 'warning') setWarning(data.message);
-        else if (name === 'start') {
+        if (name === 'start') {
           setRuns(rs => rs.map((r, i) => (i === data.index ? { ...r, feature: data.feature, title: feature ? r.title : data.title, state: 'running' } : r)));
         } else if (name === 'log') {
           setRuns(rs => rs.map(r => (r.feature === data.feature ? { ...r, log: (r.log + stripAnsi(data.text)).slice(-MAX_LOG) } : r)));
@@ -297,7 +297,12 @@ export const CreateFeaturesModal: React.FC<Props> = ({
 
           {step === 'run' && (
             <>
-              {warning && <p className="text-[11px] rounded-lg p-3 bg-amber-500/10 text-amber-800 dark:text-amber-300 flex gap-1.5"><AlertTriangle size={13} className="shrink-0 mt-px" />{warning}</p>}
+              {!finished && runs.some(r => r.state === 'running' && BYPASS_PROMPT.test(r.log)) && (
+                <p role="alert" className="text-[11px] rounded-lg p-3 bg-amber-500/10 text-amber-800 dark:text-amber-300 flex gap-1.5">
+                  <AlertTriangle size={13} className="shrink-0 mt-px" />
+                  <span>Claude is waiting for its one-time “Bypass Permissions mode” confirmation. Run <code className="font-mono">claude --dangerously-skip-permissions</code> once in your own terminal and choose “Yes, I accept”, then close this dialog and use ↻ to regenerate the spec.</span>
+                </p>
+              )}
               {!finished && <p className="text-[11px] text-zinc-500">{agentLabel} is writing each spec with Spec Kit. This can take a few minutes per feature; closing this dialog doesn’t stop it.</p>}
               {runs.map((r, i) => (
                 <section key={i} className="rounded-lg border border-zinc-200 dark:border-zinc-800">

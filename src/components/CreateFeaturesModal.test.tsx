@@ -94,6 +94,20 @@ describe('CreateFeaturesModal', () => {
     expect(screen.getByText('Create 1 feature')).toBeEnabled();
   });
 
+  it('explains Claude’s one-time bypass-permissions prompt while it waits', async () => {
+    global.fetch = vi.fn(async () => {
+      // Start + a log that looks like Claude's confirmation screen; the stream stays open.
+      const enc = new TextEncoder();
+      const body = new ReadableStream({ start(c) {
+        c.enqueue(enc.encode('event: start\ndata: {"index":0,"total":1,"feature":"002-a","title":"A"}\n\n'));
+        c.enqueue(enc.encode('event: log\ndata: {"feature":"002-a","text":"WARNING:ClaudeCoderunninginBypassPermissionsmode ... Yes,Iaccept"}\n\n'));
+      } });
+      return new Response(body, { headers: { 'Content-Type': 'text/event-stream' } });
+    }) as unknown as typeof fetch;
+    renderModal({ retryFeature: '002-a' });
+    expect(await screen.findByText(/one-time “Bypass Permissions mode” confirmation/)).toBeInTheDocument();
+  });
+
   it('regenerates a spec directly in retry mode', async () => {
     renderModal({ retryFeature: '002-password-reset' });
     await screen.findByText('Review spec →');

@@ -27,7 +27,6 @@ import { buildSpecPrompt } from './specPrompt';
 type FeatureWorkflow = Pick<WorkflowUseCases, 'getWorkflowState' | 'createFeature' | 'runPhase'>;
 
 export type FeatureEvent =
-  | { type: 'warning'; message: string }
   | { type: 'start'; index: number; total: number; feature: string; title: string }
   | { type: 'log'; feature: string; text: string }
   | { type: 'done'; feature: string; ok: boolean; message: string };
@@ -35,6 +34,10 @@ export type FeatureEvent =
 export type GroupingResult = { groups: FeatureGroup[]; unassigned: string[] };
 
 export class FeatureCreationError extends Error {}
+
+export const SPEC_KIT_MISSING =
+  'Spec Kit isn’t initialized in this workspace (.specify/templates is missing), so no spec can be written. ' +
+  'Run `specify init --here --ai <your agent>` in the project folder (or install it from Extensions), and make sure the app is pointed at that project (WORKSPACE_PATH). Nothing was created.';
 
 export class FeatureCreationService {
   constructor(
@@ -97,9 +100,8 @@ export class FeatureCreationService {
     const valid = validateGroups(groups, doc);
     if (!valid.ok) throw new FeatureCreationError(valid.error);
 
-    if (!(await this.specKitReady(workspacePath))) {
-      onEvent({ type: 'warning', message: 'Spec Kit doesn’t look initialized in this workspace (.specify/templates is missing). Install the specify CLI from Extensions and run its init, or the spec step may fail.' });
-    }
+    // Without Spec Kit the Specify phase is certain to fail; don't leave half-made features behind.
+    if (!(await this.specKitReady(workspacePath))) throw new FeatureCreationError(SPEC_KIT_MISSING);
 
     const created: string[] = [];
     const failed: string[] = [];
@@ -146,6 +148,7 @@ export class FeatureCreationService {
     onLog: (text: string) => void
   ): Promise<{ ok: boolean; state: WorkflowState }> {
     if (!isSafeName(feature)) throw new RequirementError(`Invalid feature name: ${feature}`);
+    if (!(await this.specKitReady(workspacePath))) throw new FeatureCreationError(SPEC_KIT_MISSING);
     const doc = await this.load(workspacePath, setId);
     const ids = doc.requirements.filter(r => r.feature === feature).map(r => r.id);
     if (ids.length === 0) throw new FeatureCreationError(`No requirements in this set are linked to ${feature}.`);

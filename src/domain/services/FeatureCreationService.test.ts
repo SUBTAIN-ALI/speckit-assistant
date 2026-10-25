@@ -126,16 +126,20 @@ describe('FeatureCreationService', () => {
     await expect(svc.generateSpec('/ws', SET, '009-none', AGENT, () => {})).rejects.toThrow(/No requirements/);
   });
 
-  it('rejects invalid groups before creating anything and warns when Spec Kit is missing', async () => {
+  it('rejects invalid groups and linked requirements before creating anything', async () => {
     await expect(svc.createFeatures('/ws', SET, [{ title: 'A', requirementIds: ['REQ-404'] }], AGENT, () => {})).rejects.toThrow(/Unknown requirement/);
     expect(workflow.features).toEqual(['001-existing']);
 
-    ws.files.delete('.specify/templates/spec-template.md');
-    const events: FeatureEvent[] = [];
-    await svc.createFeatures('/ws', SET, [{ title: 'A', requirementIds: ['REQ-001'] }], AGENT, e => events.push(e));
-    expect(events[0]).toMatchObject({ type: 'warning', message: expect.stringContaining('Spec Kit') });
-
-    // REQ-001 is now linked, so it can't go into another feature.
+    await svc.createFeatures('/ws', SET, [{ title: 'A', requirementIds: ['REQ-001'] }], AGENT, () => {});
     await expect(svc.createFeatures('/ws', SET, [{ title: 'B', requirementIds: ['REQ-001'] }], AGENT, () => {})).rejects.toThrow(/already part of feature/);
+  });
+
+  it('refuses to start without Spec Kit, creating nothing and running no agent', async () => {
+    ws.files.delete('.specify/templates/spec-template.md');
+    await expect(svc.createFeatures('/ws', SET, [{ title: 'A', requirementIds: ['REQ-001'] }], AGENT, () => {})).rejects.toThrow(/Spec Kit isn’t initialized/);
+    expect(workflow.features).toEqual(['001-existing']);
+    expect(workflow.runs).toEqual([]);
+    expect((await reqs.get('/ws', SET))!.requirements[0].feature).toBeUndefined();
+    await expect(svc.generateSpec('/ws', SET, '002-a', AGENT, () => {})).rejects.toThrow(/Spec Kit isn’t initialized/);
   });
 });
