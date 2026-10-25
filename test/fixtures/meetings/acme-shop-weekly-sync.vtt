@@ -1,0 +1,49 @@
+WEBVTT
+
+1
+00:00:04.120 --> 00:00:11.480
+Sarah Chen (PM): Okay, let's start. Two things for the enterprise launch on December 1st: account recovery and order history.
+
+2
+00:00:12.010 --> 00:00:21.300
+Sarah Chen (PM): Support says about forty percent of tickets are users who are locked out. We need self-service password reset by email.
+
+3
+00:00:22.050 --> 00:00:30.900
+Omar Haddad (Eng): Agreed. The reset link should expire after thirty minutes and only work once. And we should not reveal whether an email is registered.
+
+4
+00:00:31.400 --> 00:00:39.750
+Priya Nair (Security): From the security side, lock the account for fifteen minutes after five failed login attempts, and email the user when that happens.
+
+5
+00:00:40.200 --> 00:00:47.600
+Omar Haddad (Eng): Lockout and reset can share the same email service. Delivery should take under a minute.
+
+6
+00:00:48.900 --> 00:00:58.300
+Sarah Chen (PM): Second topic. Enterprise customers want to see their order history for the last twelve months and download it as CSV for their accounting.
+
+7
+00:00:58.800 --> 00:01:07.200
+Omar Haddad (Eng): The order list should be paginated, twenty-five per page, and filterable by date range and status.
+
+8
+00:01:07.900 --> 00:01:15.400
+Sarah Chen (PM): The CSV needs order number, date, items, total and status. Must have for launch.
+
+9
+00:01:16.000 --> 00:01:23.800
+Priya Nair (Security): Users must only ever see their own orders. Admins of an enterprise account can see all orders for that account.
+
+10
+00:01:24.500 --> 00:01:31.200
+Omar Haddad (Eng): One open thing: do enterprise customers need single sign-on for launch? Nobody has decided that yet.
+
+11
+00:01:31.900 --> 00:01:38.600
+Sarah Chen (PM): Let's not commit to SSO for December. Dark mode came up again too, but that's a nice-to-have for later.
+
+12
+00:01:39.200 --> 00:01:44.000
+Sarah Chen (PM): Great, that's it. Thanks everyone.
