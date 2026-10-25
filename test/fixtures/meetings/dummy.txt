@@ -1,0 +1,22 @@
+Meeting: QuickBite delivery app – planning call
+Date: 2026-10-22
+Participants: Lina Torres (Product), Daniel Kim (Engineering), Aisha Rahman (Design), Marco Rossi (Operations)
+
+[00:00:05] Lina Torres: Thanks for joining. Goal today is to agree what we ship before the holiday season, which starts November 20th.
+[00:00:14] Lina Torres: Number one complaint from customers is "where is my order?". We need live tracking of the driver on a map once the order is picked up.
+[00:00:26] Daniel Kim: We can update the driver location every ten seconds. The map should show an estimated arrival time and refresh it when the driver moves.
+[00:00:38] Aisha Rahman: Customers also want a push notification when the driver is five minutes away, and another one when the order is delivered.
+[00:00:49] Marco Rossi: From operations: the customer must never see the driver's phone number. Calls should go through a masked number.
+[00:01:02] Daniel Kim: Also, the driver's location should only be shared while the order is active. Stop sharing as soon as it's marked delivered.
+[00:01:15] Lina Torres: Second topic is promo codes. Marketing wants to run holiday campaigns.
+[00:01:24] Lina Torres: A customer enters a code at checkout and gets either a percentage off or a fixed amount off.
+[00:01:33] Daniel Kim: Each code needs an expiry date, a minimum order value, and a limit of one use per customer.
+[00:01:44] Marco Rossi: Operations needs a simple admin page to create and disable codes, and to see how many times each code was used.
+[00:01:56] Aisha Rahman: If a code is invalid or expired, the checkout should explain why, not just say "error".
+[00:02:08] Daniel Kim: Open question: can a customer combine a promo code with the existing loyalty points discount? I don't know what finance wants.
+[00:02:17] Lina Torres: I'll check with finance. Let's not decide that today.
+[00:02:24] Marco Rossi: What about tipping the driver in the app?
+[00:02:30] Lina Torres: Not for this release. Tipping is out of scope until next year.
+[00:02:38] Aisha Rahman: Someone asked for scheduling orders for later in the day. Maybe a nice-to-have if we have time.
+[00:02:47] Daniel Kim: Performance-wise, the tracking screen has to load in under two seconds on a 4G connection.
+[00:02:55] Lina Torres: Great. Tracking and promo codes are must-haves for November 20th. Thanks all.
