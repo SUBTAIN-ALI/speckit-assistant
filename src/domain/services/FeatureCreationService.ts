@@ -75,18 +75,29 @@ export class FeatureCreationService {
       if (err instanceof NotConfiguredError) throw new FeatureCreationError(err.message);
       throw err;
     }
-    let res;
-    try {
-      res = await llm.client.completeJson({
-        system: GROUPING_SYSTEM_PROMPT,
-        user: groupingUserMessage(doc, selected),
-        schemaName: GROUPING_SCHEMA_NAME,
-        schema: GROUPING_SCHEMA as unknown as Record<string, unknown>,
-      });
-    } catch (err) {
-      throw new FeatureCreationError(err instanceof LlmError ? `Couldn’t get a suggestion from ${llm.model}: ${err.message}` : String(err));
+    const ids = selected.map(r => r.id);
+    const ask = async (user: string): Promise<GroupingResult> => {
+      try {
+        const res = await llm.client.completeJson({
+          system: GROUPING_SYSTEM_PROMPT,
+          user,
+          schemaName: GROUPING_SCHEMA_NAME,
+          schema: GROUPING_SCHEMA as unknown as Record<string, unknown>,
+        });
+        return normalizeGrouping(res.json, ids);
+      } catch (err) {
+        throw new FeatureCreationError(err instanceof LlmError ? `Couldn’t get a suggestion from ${llm.model}: ${err.message}` : String(err));
+      }
+    };
+    const message = groupingUserMessage(doc, selected);
+    let result = await ask(message);
+    // Models sometimes leave requirements out despite the rule; ask once more,
+    // naming them, and keep whichever answer covers more.
+    if (result.groups.length === 0 || result.unassigned.length > 0) {
+      const missing = result.groups.length === 0 ? ids : result.unassigned;
+      const retry = await ask(`${message}\n\nYour previous answer left out: ${missing.join(', ')}. Every listed requirement id must appear in exactly one feature — attach open questions, assumptions, constraints and non-functional requirements to the feature they affect most.`);
+      if (retry.groups.length > 0 && (result.groups.length === 0 || retry.unassigned.length < result.unassigned.length)) result = retry;
     }
-    const result = normalizeGrouping(res.json, selected.map(r => r.id));
     if (result.groups.length === 0) throw new FeatureCreationError('The model didn’t return a usable grouping. Try again, or put everything in one feature.');
     return result;
   }

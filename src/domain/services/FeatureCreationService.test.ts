@@ -73,11 +73,28 @@ describe('FeatureCreationService', () => {
     expect(llm.calls[0].user).toContain('REQ-004 [open-question, should] SSO?');
   });
 
+  it('asks again when the model leaves requirements out, keeping the better answer', async () => {
+    llm = new ScriptedLlm('openai', [
+      { json: { features: [{ name: 'a', title: 'A', summary: '', requirementIds: ['REQ-001'] }] } },
+      { json: { features: [{ name: 'a', title: 'A', summary: '', requirementIds: ['REQ-001', 'REQ-002'] }, { name: 'b', title: 'B', summary: '', requirementIds: ['REQ-003'] }] } },
+    ]);
+    const result = await svc.proposeGrouping('/ws', SET, ['REQ-001', 'REQ-002', 'REQ-003']);
+    expect(result.unassigned).toEqual([]);
+    expect(llm.calls[1].user).toContain('Your previous answer left out: REQ-002, REQ-003');
+
+    // A worse retry doesn't replace a better first answer.
+    llm = new ScriptedLlm('openai', [
+      { json: { features: [{ name: 'a', title: 'A', summary: '', requirementIds: ['REQ-001', 'REQ-002'] }] } },
+      { json: { features: [] } },
+    ]);
+    expect((await svc.proposeGrouping('/ws', SET, ['REQ-001', 'REQ-002', 'REQ-003'])).unassigned).toEqual(['REQ-003']);
+  });
+
   it('reports grouping failures as user-facing errors', async () => {
     await expect(svc.proposeGrouping('/ws', SET, [])).rejects.toThrow(/Select at least one/);
     llm = new ScriptedLlm('openai', [new LlmError('auth', 'bad key')]);
     await expect(svc.proposeGrouping('/ws', SET, ['REQ-001'])).rejects.toThrow(/Couldn’t get a suggestion/);
-    llm = new ScriptedLlm('openai', [{ json: { features: [] } }]);
+    llm = new ScriptedLlm('openai', [{ json: { features: [] } }, { json: { features: [] } }]);
     await expect(svc.proposeGrouping('/ws', SET, ['REQ-001'])).rejects.toThrow(/usable grouping/);
   });
 

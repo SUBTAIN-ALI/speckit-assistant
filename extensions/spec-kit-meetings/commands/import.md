@@ -19,7 +19,7 @@ Everything you write goes into `<list-dir>/`. Do not modify any other file.
    - Only requirements the meeting actually discussed. Do not invent features, numbers or decisions.
    - Each requirement is a single, testable statement; split compound requests.
    - `type`: `functional` (behavior), `non-functional` (performance, security, usability, reliability…), `constraint` (fixed limits: deadlines, platforms, budgets, regulations), `assumption` (taken as given), `open-question` (raised but not decided — never answer it yourself).
-   - `priority` (MoSCoW): `must`, `should`, `could`, `wont`. Use `should` when unclear, `could` for "nice to have / later", `wont` only for things explicitly ruled out. Keep ruled-out and nice-to-have items as requirements rather than dropping them.
+   - `priority` (MoSCoW): `must`, `should`, `could`, `wont`. Use `should` when unclear, `could` for "nice to have / later", `wont` only for things explicitly ruled out. Always include nice-to-haves (`could`) and anything explicitly ruled out or declared out of scope for this release (`wont`, e.g. "not for this release") — recording what was ruled out is part of the requirements; never drop it.
    - `description`: one to three plain sentences for a developer who missed the meeting.
    - `acceptanceCriteria`: concrete, verifiable conditions (empty list for open questions and assumptions when none apply).
    - `sourceTimestamp` / `sourceSpeaker` / `sourceQuote`: where it came from; the quote is a short verbatim excerpt (under 200 characters). Empty strings when the transcript has no timestamps or speakers.
