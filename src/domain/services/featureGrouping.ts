@@ -110,6 +110,7 @@ export function validateGroups(groups: unknown, doc: RequirementsDoc): { ok: tru
       if (!r) return { ok: false, error: `Unknown requirement: ${String(id)}` };
       if (seen.has(id)) return { ok: false, error: `${id} is in more than one feature.` };
       if (r.feature) return { ok: false, error: `${id} is already part of feature ${r.feature}.` };
+      if (r.priority === 'wont') return { ok: false, error: `${id} is marked won’t-have (ruled out), so it can’t become a feature. Change its priority first.` };
       seen.add(id);
     }
     out.push({ name, title: title || name, summary: typeof g.summary === 'string' ? g.summary : undefined, requirementIds: ids as string[] });

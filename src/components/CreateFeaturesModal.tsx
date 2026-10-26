@@ -34,7 +34,9 @@ const BYPASS_PROMPT = /bypass\s*permissions\s*mode[\s\S]*accept/i;
 export const CreateFeaturesModal: React.FC<Props> = ({
   isOpen, setId, doc, agentConfig, agentLabel, llmLabel, retryFeature, onClose, onFinished, onOpenFeature,
 }) => {
-  const candidates = useMemo(() => doc.requirements.filter(r => !r.feature && r.status !== 'rejected'), [doc]);
+  // Won't-have items were explicitly ruled out in the meeting: never built.
+  const candidates = useMemo(() => doc.requirements.filter(r => !r.feature && r.status !== 'rejected' && r.priority !== 'wont'), [doc]);
+  const wontCount = doc.requirements.filter(r => !r.feature && r.status !== 'rejected' && r.priority === 'wont').length;
   const byId = useMemo(() => new Map(doc.requirements.map(r => [r.id, r])), [doc]);
 
   const [step, setStep] = useState<Step>('select');
@@ -226,7 +228,10 @@ export const CreateFeaturesModal: React.FC<Props> = ({
               ) : (
                 <div>
                   <div className="flex items-center justify-between mb-2">
-                    <p className="text-[11px] font-semibold text-zinc-600 dark:text-zinc-400">Requirements to build ({selectedCount} selected)</p>
+                    <p className="text-[11px] font-semibold text-zinc-600 dark:text-zinc-400">
+                      Requirements to build ({selectedCount} selected)
+                      {wontCount > 0 && <span className="font-normal text-zinc-400"> · {wontCount} won’t-have left out</span>}
+                    </p>
                     <div className="flex gap-2 text-[11px]">
                       <button className="underline text-zinc-500" onClick={() => setSelected(new Set(candidates.filter(r => r.status === 'accepted').map(r => r.id)))}>Accepted only</button>
                       <button className="underline text-zinc-500" onClick={() => setSelected(new Set(candidates.map(r => r.id)))}>All</button>
@@ -310,6 +315,7 @@ export const CreateFeaturesModal: React.FC<Props> = ({
                     <span className="flex items-center gap-2 text-xs">
                       {r.state === 'running' ? <Loader2 size={13} className="animate-spin text-blue-500" /> : r.state === 'ok' ? <CheckCircle2 size={13} className="text-emerald-500" /> : r.state === 'failed' ? <AlertTriangle size={13} className="text-red-500" /> : <span className="w-3 h-3 rounded-full border border-zinc-300" />}
                       <span className="font-semibold text-zinc-900 dark:text-white">{r.title}</span>
+                      {finished && r.state === 'pending' && <span className="text-[10px] text-zinc-500">Not created</span>}
                       {r.feature && <span className="font-mono text-[10px] text-zinc-400">specs/{r.feature}</span>}
                     </span>
                     {r.state === 'ok' && <button onClick={() => onOpenFeature(r.feature)} className="text-[11px] font-semibold text-blue-600 dark:text-blue-400 hover:underline">Review spec →</button>}

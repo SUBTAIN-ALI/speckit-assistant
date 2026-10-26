@@ -11,6 +11,7 @@ const DOC: RequirementsDoc = {
     { id: 'REQ-001', title: 'Reset password', type: 'functional', priority: 'must', status: 'accepted', description: '', acceptanceCriteria: [] },
     { id: 'REQ-002', title: 'CSV export', type: 'functional', priority: 'should', status: 'accepted', description: '', acceptanceCriteria: [] },
     { id: 'REQ-003', title: 'Dark mode', type: 'functional', priority: 'could', status: 'draft', description: '', acceptanceCriteria: [] },
+    { id: 'REQ-005', title: 'Tipping', type: 'functional', priority: 'wont', status: 'accepted', description: '', acceptanceCriteria: [] },
     { id: 'REQ-004', title: 'Old thing', type: 'functional', priority: 'must', status: 'accepted', description: '', acceptanceCriteria: [], feature: '001-old' },
   ],
 };
@@ -58,6 +59,20 @@ describe('CreateFeaturesModal', () => {
     expect(screen.getByText('Requirements to build (2 selected)')).toBeInTheDocument();
     expect(screen.queryByText('Old thing')).not.toBeInTheDocument();
     expect(screen.getByText('Dark mode')).toBeInTheDocument();
+    // Won't-have items are never offered for building.
+    expect(screen.queryByText('Tipping')).not.toBeInTheDocument();
+    expect(screen.getByText(/1 won’t-have left out/)).toBeInTheDocument();
+  });
+
+  it('marks features as not created when the run fails before starting', async () => {
+    global.fetch = vi.fn(async (url: string) => url === '/api/requirements/grouping'
+      ? new Response(JSON.stringify({ groups: [{ name: 'a', title: 'A', requirementIds: ['REQ-001'] }], unassigned: [] }))
+      : sse([['error', { message: 'Spec Kit isn’t initialized in this workspace' }]])) as unknown as typeof fetch;
+    renderModal();
+    fireEvent.click(screen.getByText('Next'));
+    fireEvent.click(await screen.findByText('Create 1 feature'));
+    expect(await screen.findByText(/Spec Kit isn’t initialized/)).toBeInTheDocument();
+    expect(await screen.findByText('Not created')).toBeInTheDocument();
   });
 
   it('runs the AI-suggested flow end to end', async () => {

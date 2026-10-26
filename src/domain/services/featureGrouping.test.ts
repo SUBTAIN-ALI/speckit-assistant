@@ -49,6 +49,9 @@ describe('featureGrouping', () => {
     expect(err([{ title: 'A', requirementIds: ['REQ-404'] }])).toMatch(/Unknown requirement/);
     expect(err([{ title: 'A', requirementIds: ['REQ-001'] }, { title: 'B', requirementIds: ['REQ-001'] }])).toMatch(/more than one/);
     expect(err([{ title: 'A', requirementIds: ['REQ-004'] }])).toMatch(/already part of feature 004-old/);
+    const withWont = appendRequirements(doc, [{ title: 'Tipping', priority: 'wont', status: 'accepted' }]);
+    const v = validateGroups([{ title: 'A', requirementIds: ['REQ-005'] }], withWont);
+    expect(v.ok ? '' : v.error).toMatch(/won’t-have/);
   });
 
   it('fences the requirements in the grouping prompt; schema is strict-compatible', () => {

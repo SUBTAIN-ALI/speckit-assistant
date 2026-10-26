@@ -39,7 +39,7 @@ export class FeatureCreationError extends Error {}
 
 export const SPEC_KIT_MISSING =
   'Spec Kit isn’t initialized in this workspace (.specify/templates is missing), so no spec can be written. ' +
-  'Run `specify init --here --ai <your agent>` in the project folder (or install it from Extensions), and make sure the app is pointed at that project (WORKSPACE_PATH). Nothing was created.';
+  'Run `specify init --here --ai <your agent>` in your project folder (Extensions → “Install specify CLI” installs it), and start the app on that project with `npx speckit-assistant -w <project>`. Nothing was created.';
 
 export class FeatureCreationService {
   constructor(
@@ -61,7 +61,7 @@ export class FeatureCreationService {
   // Asks the configured LLM how to split the given requirements into features.
   async proposeGrouping(workspacePath: string, setId: string, requirementIds: string[]): Promise<GroupingResult> {
     const doc = await this.load(workspacePath, setId);
-    const selected = doc.requirements.filter(r => requirementIds.includes(r.id) && !r.feature);
+    const selected = doc.requirements.filter(r => requirementIds.includes(r.id) && !r.feature && r.priority !== 'wont');
     if (selected.length === 0) throw new FeatureCreationError('Select at least one requirement that isn’t already in a feature.');
 
     if (this.agent && (await this.integrations.getEngine()) === 'agent') {

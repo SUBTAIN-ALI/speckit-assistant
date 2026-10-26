@@ -154,7 +154,7 @@ export const RequirementsSection: React.FC<Props> = ({ agentConfig, agentLabel, 
     : [];
 
   const current = sets.find(s => s.id === setId);
-  const buildable = doc?.requirements.filter(r => !r.feature && r.status === 'accepted').length ?? 0;
+  const buildable = doc?.requirements.filter(r => !r.feature && r.status === 'accepted' && r.priority !== 'wont').length ?? 0;
   const features = useMemo(() => {
     const m = new Map<string, number>();
     for (const r of doc?.requirements ?? []) if (r.feature) m.set(r.feature, (m.get(r.feature) ?? 0) + 1);

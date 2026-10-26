@@ -324,7 +324,7 @@ async function createFeaturesFromRequirements(cmdArgs: string[]) {
   if (!doc) throw new Error(`Requirement list not found: ${setId}`);
   // --all includes drafts; by default only accepted requirements are built.
   const ids = doc.requirements
-    .filter(r => !r.feature && (cmdArgs.includes('--all') ? r.status !== 'rejected' : r.status === 'accepted'))
+    .filter(r => !r.feature && r.priority !== 'wont' && (cmdArgs.includes('--all') ? r.status !== 'rejected' : r.status === 'accepted'))
     .map(r => r.id);
   if (ids.length === 0) throw new Error('No accepted requirements left to build (accept some, or pass --all).');
 
