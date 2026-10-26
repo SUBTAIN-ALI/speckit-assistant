@@ -69,6 +69,23 @@ describe('WorkflowService', () => {
     expect(workspaceRepo.saveWorkflowState).toHaveBeenCalled();
   });
 
+  it('ends a session still open for the phase when its card is approved or discarded', async () => {
+    await service.approvePhase('/workspace', 'implementation', 'auth');
+    expect(agentRunner.stop).toHaveBeenCalledWith('implementation', 'auth');
+    await service.discardPhase('/workspace', 'planning', 'auth');
+    expect(agentRunner.stop).toHaveBeenCalledWith('planning', 'auth');
+  });
+
+  it('keeps the approval when an interactive run ends after the card was moved', async () => {
+    // Clarify-style: the session stays open, the user approves, then it is killed (non-zero exit).
+    agentRunner.runPhase.mockImplementation(async () => {
+      await service.approvePhase('/workspace', 'implementation', 'auth');
+      return 1;
+    });
+    const state = await service.runPhase('/workspace', 'implementation', 'auth', { agentType: 'claude' });
+    expect(state.features[0].phases.find(p => p.phase === 'implementation')!.status).toBe('approved');
+  });
+
   it('should discard phase and mark downstream phases as stale', async () => {
     // Set downstream phases to approved so they can become stale
     const stateWithApprovedPhases: WorkflowState = JSON.parse(JSON.stringify(mockState));

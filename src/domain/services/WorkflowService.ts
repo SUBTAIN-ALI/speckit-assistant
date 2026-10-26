@@ -120,6 +120,14 @@ export class WorkflowService implements WorkflowUseCases {
       const runPhaseState = this.findPhase(freshState, phase, targetFeature);
       if (runPhaseState && runCost) runPhaseState.cost = runCost;
 
+      // The user approved or discarded the phase while it was still running
+      // (e.g. an interactive Clarify session, which never exits on its own):
+      // their decision stands.
+      if (runPhaseState && runPhaseState.status !== 'running') {
+        await this.workspaceRepo.saveWorkflowState(workspacePath, freshState);
+        return freshState;
+      }
+
       if (exitCode !== 0) {
         this.setPhaseStatus(freshState, phase, targetFeature, 'idle');
         await this.workspaceRepo.saveWorkflowState(workspacePath, freshState);
@@ -145,6 +153,7 @@ export class WorkflowService implements WorkflowUseCases {
       return freshState;
     } catch (err) {
       const freshState = await this.workspaceRepo.getWorkflowState(workspacePath);
+      if (this.findPhase(freshState, phase, targetFeature)?.status !== 'running') throw err; // user already decided
       this.setPhaseStatus(freshState, phase, targetFeature, 'idle');
       await this.workspaceRepo.saveWorkflowState(workspacePath, freshState);
       throw err;
@@ -261,6 +270,8 @@ export class WorkflowService implements WorkflowUseCases {
     }
 
     await this.workspaceRepo.saveWorkflowState(workspacePath, state);
+    // Moving the card on ends a session still open for it (Clarify stays at its prompt).
+    await this.agentRunner.stop(phase, targetFeature);
     return state;
   }
 
@@ -277,6 +288,7 @@ export class WorkflowService implements WorkflowUseCases {
 
     this.markDownstreamStale(state, phase, targetFeature);
     await this.workspaceRepo.saveWorkflowState(workspacePath, state);
+    await this.agentRunner.stop(phase, targetFeature);
     return state;
   }
 

@@ -11,7 +11,7 @@ const FIXTURE = path.resolve(__dirname, '../../../test/fixtures/speckit-demo');
 describe('WorkflowService.markStale and workspace directory ops', () => {
   let ws: string;
   const repo = new FSWorkspaceRepository();
-  const svc = new WorkflowService(repo, {} as never, new MemoryHistory());
+  const svc = new WorkflowService(repo, { stop: async () => false } as never, new MemoryHistory());
 
   beforeEach(() => {
     ws = fs.mkdtempSync(path.join(os.tmpdir(), 'speckit-stale-'));
