@@ -1,5 +1,7 @@
 import { AgentConfig, WorkflowState } from '../models/types';
-import { RequirementsDoc, isSafeName } from '../models/requirements';
+import { RequirementsDoc, isSafeName, setDir } from '../models/requirements';
+import { ExecutionHistoryPort } from '../ports/out/ExecutionHistoryPort';
+import { MeetingAgentRunner } from './MeetingAgentRunner';
 import { WorkflowUseCases } from '../ports/in/WorkflowUseCases';
 import { LlmError } from '../ports/out/LlmPort';
 import { WorkspaceRepositoryPort } from '../ports/out/WorkspaceRepositoryPort';
@@ -44,7 +46,10 @@ export class FeatureCreationService {
     private workspaceRepo: WorkspaceRepositoryPort,
     private requirements: RequirementsService,
     private integrations: IntegrationsService,
-    private workflow: FeatureWorkflow
+    private workflow: FeatureWorkflow,
+    // Agent engine: the active agent runs /speckit.meetings.group (default).
+    private agent?: MeetingAgentRunner,
+    private executionHistory?: ExecutionHistoryPort
   ) {}
 
   private async load(workspacePath: string, setId: string): Promise<RequirementsDoc> {
@@ -58,6 +63,10 @@ export class FeatureCreationService {
     const doc = await this.load(workspacePath, setId);
     const selected = doc.requirements.filter(r => requirementIds.includes(r.id) && !r.feature);
     if (selected.length === 0) throw new FeatureCreationError('Select at least one requirement that isn’t already in a feature.');
+
+    if (this.agent && (await this.integrations.getEngine()) === 'agent') {
+      return this.groupWithAgent(this.agent, workspacePath, setId, selected.map(r => r.id));
+    }
 
     let llm;
     try {
@@ -79,6 +88,43 @@ export class FeatureCreationService {
     }
     const result = normalizeGrouping(res.json, selected.map(r => r.id));
     if (result.groups.length === 0) throw new FeatureCreationError('The model didn’t return a usable grouping. Try again, or put everything in one feature.');
+    return result;
+  }
+
+  private async groupWithAgent(agent: MeetingAgentRunner, workspacePath: string, setId: string, ids: string[]): Promise<GroupingResult> {
+    const ready = await agent.readiness(workspacePath, false);
+    if (!ready.ok) throw new FeatureCreationError(ready.problems.join(' '));
+    const dir = setDir(setId);
+    await this.workspaceRepo.writeFile(workspacePath, `${dir}/grouping-request.json`, JSON.stringify({ requirementIds: ids }, null, 2));
+    await this.workspaceRepo.writeFile(workspacePath, `${dir}/grouping.json`, '');
+
+    const record = await this.executionHistory?.start(workspacePath, {
+      kind: 'meeting', feature: null, label: `Group ${ids.length} requirement(s)`, command: `${ready.agentLabel}: /speckit.meetings.group`,
+    });
+    const log = (t: string) => { if (record) this.executionHistory!.appendLog(workspacePath, record.id, t); };
+    let context: string | undefined;
+    let result: GroupingResult | undefined;
+    let cost;
+    let exitCode = 0;
+    for (let attempt = 0; attempt < 2 && !result; attempt++) {
+      const run = await agent.run(workspacePath, 'group', { key: setId, listDir: dir, args: dir, context, onData: log });
+      cost = run.cost;
+      exitCode = run.exitCode;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(await this.workspaceRepo.readFile(workspacePath, `${dir}/grouping.json`));
+      } catch {
+        context = `Your previous ${dir}/grouping.json was missing or not valid JSON. Write it now, as JSON only, in exactly the required shape.`;
+        continue;
+      }
+      const normalized = normalizeGrouping(parsed, ids);
+      if (normalized.groups.length > 0) result = normalized;
+      else context = `Your previous ${dir}/grouping.json contained no usable features. Use only these requirement ids: ${ids.join(', ')}.`;
+    }
+    if (record) {
+      await this.executionHistory!.finish(workspacePath, record.id, { status: result ? 'passed' : 'failed', exitCode: result ? 0 : exitCode || 1, cost });
+    }
+    if (!result) throw new FeatureCreationError(`${ready.agentLabel} didn’t return a usable grouping. Try again, or put everything in one feature.`);
     return result;
   }
 

@@ -1011,6 +1011,7 @@ export default function Dashboard() {
             agentConfig={agentConfig}
             agentLabel={activeAgent(agentsFile)?.name ?? agentConfig.agentType}
             onStateChange={setState}
+            onNavigate={setSection}
             onOpenFeature={async (name) => {
               await fetchState();
               setSection('workflow');

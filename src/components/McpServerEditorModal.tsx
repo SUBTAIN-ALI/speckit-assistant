@@ -31,6 +31,18 @@ const parseEnv = (s: string): Record<string, string> => {
 const stringifyEnv = (env?: Record<string, string>) =>
   env ? Object.entries(env).map(([k, v]) => `${k}=${v}`).join('\n') : '';
 
+// "Name: value" per line (HTTP header style).
+export const parseHeaders = (s: string): Record<string, string> => {
+  const headers: Record<string, string> = {};
+  for (const line of s.split('\n')) {
+    const i = line.indexOf(':');
+    if (i > 0 && line.slice(0, i).trim()) headers[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+  }
+  return headers;
+};
+const stringifyHeaders = (h?: Record<string, string>) =>
+  h ? Object.entries(h).map(([k, v]) => `${k}: ${v}`).join('\n') : '';
+
 export const McpServerEditorModal: React.FC<McpServerEditorModalProps> = ({ isOpen, onClose, server, onSave }) => {
   const [name, setName] = useState('');
   const [transport, setTransport] = useState<McpTransport>('stdio');
@@ -38,6 +50,7 @@ export const McpServerEditorModal: React.FC<McpServerEditorModalProps> = ({ isOp
   const [argsStr, setArgsStr] = useState('');
   const [envStr, setEnvStr] = useState('');
   const [url, setUrl] = useState('');
+  const [headersStr, setHeadersStr] = useState('');
   const [description, setDescription] = useState('');
   const [enabled, setEnabled] = useState(true);
 
@@ -48,6 +61,7 @@ export const McpServerEditorModal: React.FC<McpServerEditorModalProps> = ({ isOp
     setArgsStr(Array.isArray(server?.args) ? server!.args!.join('\n') : '');
     setEnvStr(stringifyEnv(server?.env));
     setUrl(server?.url || '');
+    setHeadersStr(stringifyHeaders(server?.headers));
     setDescription(server?.description || '');
     setEnabled(server?.enabled !== false);
   }, [server, isOpen]);
@@ -59,6 +73,7 @@ export const McpServerEditorModal: React.FC<McpServerEditorModalProps> = ({ isOp
   const handleSave = () => {
     const args = argsStr.split('\n').map(a => a.trim()).filter(Boolean);
     const env = parseEnv(envStr);
+    const headers = parseHeaders(headersStr);
     onSave({
       id: server?.id || newId(),
       name: name.trim() || 'unnamed',
@@ -67,7 +82,7 @@ export const McpServerEditorModal: React.FC<McpServerEditorModalProps> = ({ isOp
       description: description.trim() || undefined,
       ...(isStdio
         ? { command: command.trim(), args: args.length ? args : undefined, env: Object.keys(env).length ? env : undefined }
-        : { url: url.trim() }),
+        : { url: url.trim(), headers: Object.keys(headers).length ? headers : undefined }),
     });
   };
 
@@ -121,6 +136,9 @@ export const McpServerEditorModal: React.FC<McpServerEditorModalProps> = ({ isOp
             <div>
               <label className={labelCls}>URL</label>
               <input className={`${input} font-mono`} value={url} onChange={e => setUrl(e.target.value)} placeholder="https://example.com/mcp" />
+              <label className={`${labelCls} mt-3`}>Headers (one per line, Name: value)</label>
+              <textarea rows={2} className={`${input} font-mono`} value={headersStr} onChange={e => setHeadersStr(e.target.value)} placeholder={'Authorization: Bearer ${MY_TOKEN}'} />
+              <p className="mt-1 text-[10px] text-zinc-500">Use <code>{'${VAR}'}</code> to reference an environment variable instead of pasting a secret.</p>
             </div>
           )}
 

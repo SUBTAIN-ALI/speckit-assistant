@@ -12,7 +12,7 @@ Rules:
 - Extract only requirements that the meeting actually discussed. Do not invent features, numbers, or decisions.
 - Each requirement must be a single, testable statement. Split compound requests into separate requirements.
 - type: "functional" (behavior the system must have), "non-functional" (performance, security, usability, reliability...), "constraint" (fixed technical or business limits: deadlines, platforms, budgets, regulations), "assumption" (something the team is taking as given), "open-question" (raised but not decided — put unresolved or ambiguous points here instead of guessing an answer).
-- priority: "must", "should", "could", "wont" (MoSCoW). Infer it from how the participants talked about it; use "should" when unclear, and "wont" only for things explicitly ruled out.
+- priority: "must", "should", "could", "wont" (MoSCoW). Infer it from how the participants talked about it; use "should" when unclear, "could" for nice-to-haves or "later" ideas, and "wont" only for things explicitly ruled out. Keep nice-to-have and ruled-out items as requirements instead of dropping them.
 - description: one to three sentences in plain language, written so a developer who missed the meeting understands it.
 - acceptanceCriteria: concrete, verifiable conditions. Empty list for open questions and assumptions when none apply.
 - sourceTimestamp / sourceSpeaker / sourceQuote: where it came from in the transcript. sourceQuote must be a short verbatim excerpt (under 200 characters). Use empty strings when the transcript has no timestamps or speakers.

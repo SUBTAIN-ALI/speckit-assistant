@@ -39,4 +39,10 @@ export const BUNDLED_EXTENSIONS: BundledExtension[] = [
     description: 'On-demand operational agents: Deploy, post-deploy Monitoring, Troubleshooting.',
     dir: 'spec-kit-devops',
   },
+  {
+    id: 'meetings',
+    label: 'Meeting Requirements',
+    description: 'Meeting → requirements (Zoom via MCP, or a transcript) and requirements → feature grouping, run by your active agent.',
+    dir: 'spec-kit-meetings',
+  },
 ];

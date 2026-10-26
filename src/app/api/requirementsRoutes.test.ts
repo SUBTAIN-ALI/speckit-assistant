@@ -78,10 +78,15 @@ describe('requirements routes', () => {
     expect((await deleteSet(new Request('http://localhost/api/requirements/sets?set=..', { method: 'DELETE' }))).status).toBe(400);
   });
 
-  it('grouping needs an AI key and valid ids', async () => {
+  it('grouping needs the meetings extension (agent engine) or an AI key (direct engine)', async () => {
     expect((await grouping(json('POST', { set, ids: 'x' }))).status).toBe(400);
-    const res = await grouping(json('POST', { set, ids: ['REQ-001'] }));
+    // No API key saved → the agent engine is the default.
+    let res = await grouping(json('POST', { set, ids: ['REQ-001'] }));
     expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/Meeting Requirements/);
+
+    await putSettings(json('PUT', { engine: 'direct' }));
+    res = await grouping(json('POST', { set, ids: ['REQ-001'] }));
     expect((await res.json()).error).toMatch(/API key/);
   });
 

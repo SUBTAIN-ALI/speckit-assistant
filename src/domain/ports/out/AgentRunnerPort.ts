@@ -1,7 +1,29 @@
 import { WorkflowPhase, AgentConfig, PersonaConfig, PersonaId, CostMetadata } from '../../models/types';
 import { DevOpsAgent } from '../../models/devopsAgents';
 
+// An on-demand slash command run by the active agent CLI (e.g. a bundled
+// extension command like /speckit.meetings.import).
+export type AgentCommand = {
+  key: string; // identifies the process (for stop / stdin)
+  command: string; // "/speckit.meetings.import"
+  args?: string; // becomes $ARGUMENTS
+  context?: string; // extra instructions placed before the command
+  // Run unattended with only these tools and MCP servers (enforced for Claude:
+  // non-interactive, anything else is denied instead of prompting).
+  restricted?: {
+    allowedTools: string[];
+    mcpServers: Record<string, unknown>; // native Claude .mcp.json "mcpServers" map
+  };
+};
+
 export interface AgentRunnerPort {
+  runCommand(
+    workspacePath: string,
+    command: AgentCommand,
+    agentConfig: AgentConfig,
+    onData?: (text: string) => void,
+    onCost?: (cost: CostMetadata) => void
+  ): Promise<number>;
   runPhase(
     workspacePath: string,
     phase: WorkflowPhase,

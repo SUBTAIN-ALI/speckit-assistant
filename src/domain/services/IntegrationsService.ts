@@ -5,6 +5,8 @@ import {
   LLM_ENV_VARS,
   LLM_PROVIDERS,
   LlmProvider,
+  REQUIREMENTS_ENGINES,
+  RequirementsEngine,
   ZOOM_CALLBACK_PATH,
   isLlmProvider,
   keyHint,
@@ -16,6 +18,7 @@ import { LlmClient, LlmClientFactory } from '../ports/out/LlmPort';
 // presence/hints come out (see IntegrationsView).
 
 export type IntegrationsUpdate = {
+  engine?: RequirementsEngine;
   llm?: {
     provider?: LlmProvider;
     // A string sets the key, null removes it, omitted leaves it unchanged.
@@ -92,6 +95,7 @@ export class IntegrationsService {
     }
     const z = creds.zoom ?? {};
     return {
+      engine: this.engineFor(creds),
       llm: { provider: this.activeProvider(creds), models, configured, keyHints, envKey },
       zoom: {
         clientId: z.clientId,
@@ -106,6 +110,10 @@ export class IntegrationsService {
   async update(patch: IntegrationsUpdate): Promise<IntegrationsView> {
     const creds = await this.store.load();
     const next: IntegrationCredentials = { ...creds };
+    if (patch.engine !== undefined) {
+      if (!REQUIREMENTS_ENGINES.includes(patch.engine)) throw new Error(`Unknown requirements engine: ${String(patch.engine)}`);
+      next.engine = patch.engine;
+    }
 
     if (patch.llm) {
       const llm = {
@@ -151,6 +159,18 @@ export class IntegrationsService {
 
     await this.store.save(next);
     return this.getView();
+  }
+
+  async getEngine(): Promise<RequirementsEngine> {
+    return this.engineFor(await this.store.load());
+  }
+
+  // An explicit choice wins. Otherwise the agent (the repo's default way of
+  // running AI work), unless an API key is already set up — then keep using it,
+  // so existing setups don't break before the meetings extension is installed.
+  private engineFor(creds: IntegrationCredentials): RequirementsEngine {
+    if (creds.engine) return creds.engine;
+    return LLM_PROVIDERS.some(p => this.keyFor(creds, p)) ? 'direct' : 'agent';
   }
 
   // The configured client for the active (or given) provider.

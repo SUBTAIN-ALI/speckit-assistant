@@ -47,13 +47,22 @@ export type ZoomSettings = {
   pendingAuth?: { state: string; verifier: string; redirectUri: string; createdAt: number; returnOrigin?: string };
 };
 
+// Who turns meetings into requirements and groups them into features:
+// 'agent' — the active agent CLI via the bundled meetings extension (default,
+//           same as every other workflow run; no API key needed);
+// 'direct' — this app calls the AI provider with your API key (faster).
+export const REQUIREMENTS_ENGINES = ['agent', 'direct'] as const;
+export type RequirementsEngine = typeof REQUIREMENTS_ENGINES[number];
+
 export type IntegrationCredentials = {
+  engine?: RequirementsEngine;
   llm?: LlmSettings;
   zoom?: ZoomSettings;
 };
 
 // What the browser is allowed to see: which secrets exist, never their values.
 export type IntegrationsView = {
+  engine: RequirementsEngine;
   llm: {
     provider: LlmProvider;
     models: Record<LlmProvider, string>;

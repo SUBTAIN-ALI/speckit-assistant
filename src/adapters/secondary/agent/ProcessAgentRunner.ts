@@ -1,4 +1,4 @@
-import { AgentRunnerPort } from "../../../domain/ports/out/AgentRunnerPort";
+import { AgentCommand, AgentRunnerPort } from "../../../domain/ports/out/AgentRunnerPort";
 import {
   WorkflowPhase,
   AgentConfig,
@@ -25,8 +25,14 @@ const PHASE_COMMANDS: Record<WorkflowPhase, string> = {
   implementation: "/speckit.implement",
 };
 
+// Extra environment for every agent run, e.g. a fresh Zoom MCP access token
+// referenced as ${ZOOM_MEETINGS_MCP_ACCESS_TOKEN} by MCP server headers.
+export type AgentEnvProvider = () => Promise<Record<string, string>>;
+
 export class ProcessAgentRunner implements AgentRunnerPort {
   private activeProcesses = new Map<string, pty.IPty>();
+
+  constructor(private envProvider?: AgentEnvProvider) {}
 
   private phaseKey(featureName: string | null, phase: WorkflowPhase): string {
     return `${featureName || "global"}-${phase}`;
@@ -179,10 +185,32 @@ export class ProcessAgentRunner implements AgentRunnerPort {
     });
   }
 
+  async runCommand(
+    workspacePath: string,
+    command: AgentCommand,
+    agentConfig: AgentConfig,
+    onData?: (text: string) => void,
+    onCost?: (cost: CostMetadata) => void,
+  ): Promise<number> {
+    const slash = command.command.startsWith("/") ? command.command : `/${command.command}`;
+    const slashCmd = command.args ? `${slash} ${command.args}` : slash;
+    const context = command.context?.trim();
+    return this.spawnAgent({
+      workspacePath,
+      procKey: command.key,
+      doneTag: `command:${slash}`,
+      agentConfig,
+      fullPrompt: context ? `${context}\n\n${slashCmd}` : slashCmd,
+      onData,
+      onCost,
+      restricted: command.restricted,
+    });
+  }
+
   // Shared spawn path for both phase and persona runs: spawns the agent CLI
   // under a PTY (so interactive CLIs detect a TTY), streams output, and resolves
   // with the exit code.
-  private spawnAgent(opts: {
+  private async spawnAgent(opts: {
     workspacePath: string;
     procKey: string;
     doneTag: string;
@@ -192,10 +220,21 @@ export class ProcessAgentRunner implements AgentRunnerPort {
     onCost?: (cost: CostMetadata) => void;
     persona?: PersonaConfig;
     devops?: DevOpsAgent;
+    restricted?: AgentCommand["restricted"];
   }): Promise<number> {
     const { workspacePath, procKey, doneTag, agentConfig, fullPrompt, onData, onCost } =
       opts;
-    const { cmd, args, stdin } = this.buildSpawnArgs(agentConfig, fullPrompt);
+    const { cmd, args, stdin } = this.buildSpawnArgs(agentConfig, fullPrompt, opts.restricted);
+    // Only await when a provider is configured, so runs without one still
+    // spawn synchronously (callers may stop/write to the process right away).
+    let extraEnv: Record<string, string> = {};
+    if (this.envProvider) {
+      try {
+        extraEnv = (await this.envProvider()) ?? {};
+      } catch {
+        // optional extras (e.g. Zoom not connected) never block a run
+      }
+    }
 
     // Buffer all terminal output and measure wall-clock duration so we can
     // compute a model/CLI-agnostic cost estimate when the process exits.
@@ -231,6 +270,7 @@ export class ProcessAgentRunner implements AgentRunnerPort {
         cwd: workspacePath,
         env: {
           ...process.env,
+          ...extraEnv,
           TERM: "xterm-256color",
           ...(opts.persona
             ? {
@@ -317,9 +357,31 @@ export class ProcessAgentRunner implements AgentRunnerPort {
   private buildSpawnArgs(
     config: AgentConfig,
     prompt: string,
+    restricted?: AgentCommand["restricted"],
   ): { cmd: string; args: string[]; stdin?: string } {
     const agentType = config.agentType;
     const cliPath = config.agentPath || this.getDefaultCli(agentType);
+
+    // Unattended, least-privilege run: print mode (no TTY prompts, no first-run
+    // bypass confirmation), "dontAsk" denies anything not allow-listed, and only
+    // the given MCP servers are loaded.
+    if (agentType === "claude" && restricted) {
+      const servers = Object.keys(restricted.mcpServers).length
+        ? ["--mcp-config", JSON.stringify({ mcpServers: restricted.mcpServers })]
+        : [];
+      return {
+        cmd: cliPath,
+        args: [
+          "-p",
+          "--permission-mode", "dontAsk",
+          "--strict-mcp-config",
+          ...servers,
+          "--allowedTools", ...restricted.allowedTools,
+          "--",
+          prompt,
+        ],
+      };
+    }
 
     switch (agentType) {
       case "claude":

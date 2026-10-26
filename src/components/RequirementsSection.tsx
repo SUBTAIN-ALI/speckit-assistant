@@ -15,15 +15,28 @@ type Props = {
   agentLabel: string;
   onStateChange: (state: WorkflowState) => void;
   onOpenFeature: (feature: string) => void;
+  onNavigate?: (section: 'extensions' | 'mcp' | 'agents') => void;
 };
+
+type Readiness = {
+  engine: 'agent' | 'direct';
+  agentLabel: string | null;
+  agent: { uploadProblems: string[]; zoomProblems: string[]; zoomServer: string | null };
+  direct: { ready: boolean; provider: string; model: string };
+};
+
+// Which section can fix a readiness problem (problems name the section).
+const fixTarget = (problem: string): 'extensions' | 'mcp' | 'agents' | null =>
+  /Extensions/.test(problem) ? 'extensions' : /MCP Tools/.test(problem) ? 'mcp' : /Agents/.test(problem) ? 'agents' : null;
 
 // Top-level "Requirements" section — the front of the SDD flow:
 //   meeting (Zoom / transcript) → requirement list → review → Create features
 //   → Spec Kit writes each spec → Workflow (clarify → plan → tasks → implement).
-export const RequirementsSection: React.FC<Props> = ({ agentConfig, agentLabel, onStateChange, onOpenFeature }) => {
+export const RequirementsSection: React.FC<Props> = ({ agentConfig, agentLabel, onStateChange, onOpenFeature, onNavigate }) => {
   const [sets, setSets] = useState<RequirementSetSummary[]>([]);
   const [setId, setSetId] = useState<string | null>(null);
   const [view, setView] = useState<IntegrationsView | null>(null);
+  const [readiness, setReadiness] = useState<Readiness | null>(null);
   const [tab, setTab] = useState<'requirements' | 'settings'>('requirements');
   const [doc, setDoc] = useState<RequirementsDoc | null>(null);
   const [loading, setLoading] = useState(false);
@@ -61,6 +74,12 @@ export const RequirementsSection: React.FC<Props> = ({ agentConfig, agentLabel, 
     fetch('/api/settings/integrations').then(r => r.json()).then(v => { if (!v.error) setView(v); }).catch(() => {});
   }, [loadSets]);
 
+  const loadReadiness = useCallback(() => {
+    fetch('/api/requirements/readiness').then(r => r.json()).then(v => { if (!v.error) setReadiness(v); }).catch(() => {});
+  }, []);
+  // Re-check whenever settings change (engine, keys, Zoom) or the tab is shown.
+  useEffect(() => { loadReadiness(); }, [view, tab, loadReadiness]);
+
   // Keep a valid selection (newest list by default).
   useEffect(() => {
     if (!setId || !sets.some(s => s.id === setId)) setSetId(sets[0]?.id ?? null);
@@ -86,10 +105,10 @@ export const RequirementsSection: React.FC<Props> = ({ agentConfig, agentLabel, 
 
   // Pick up edits made to requirements.md outside the app.
   useEffect(() => {
-    const onFocus = () => { if (setId && tab === 'requirements') { loadDoc(setId); loadSets(); } };
+    const onFocus = () => { loadReadiness(); if (setId && tab === 'requirements') { loadDoc(setId); loadSets(); } };
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
-  }, [setId, tab, loadDoc, loadSets]);
+  }, [setId, tab, loadDoc, loadSets, loadReadiness]);
 
   const onDocChange = (next: RequirementsDoc | null) => {
     setDoc(next);
@@ -121,9 +140,18 @@ export const RequirementsSection: React.FC<Props> = ({ agentConfig, agentLabel, 
     await loadSets();
   };
 
-  const llmLabel = view && view.llm.configured[view.llm.provider]
-    ? `${LLM_PROVIDER_LABELS[view.llm.provider]} · ${view.llm.models[view.llm.provider]}`
-    : null;
+  // Who extracts and groups: the active agent (meetings extension) or the
+  // direct API. null = not ready yet (the status panel says why).
+  const agentMode = readiness?.engine !== 'direct';
+  const llmLabel = agentMode
+    ? (readiness && readiness.agent.uploadProblems.length === 0 ? `${readiness.agentLabel ?? agentLabel} (agent)` : null)
+    : (view && view.llm.configured[view.llm.provider]
+      ? `${LLM_PROVIDER_LABELS[view.llm.provider]} · ${view.llm.models[view.llm.provider]}`
+      : null);
+  const zoomReady = !!view?.zoom.connected && (!agentMode || (readiness?.agent.zoomProblems.length ?? 1) === 0);
+  const problems = agentMode && readiness
+    ? [...new Set([...readiness.agent.uploadProblems, ...readiness.agent.zoomProblems])]
+    : [];
 
   const current = sets.find(s => s.id === setId);
   const buildable = doc?.requirements.filter(r => !r.feature && r.status === 'accepted').length ?? 0;
@@ -236,12 +264,23 @@ export const RequirementsSection: React.FC<Props> = ({ agentConfig, agentLabel, 
 
         {banner && <Banner banner={banner} onDismiss={() => setBanner(null)} />}
 
-        {view && (!llmLabel || !view.zoom.connected) && (
-          <p className="mb-4 text-[11px] text-zinc-600 dark:text-zinc-400 bg-zinc-50 dark:bg-zinc-900/60 rounded-lg p-3">
-            {!llmLabel ? 'No AI provider key yet. ' : ''}
-            {!view.zoom.connected ? 'Zoom isn’t connected — you can still import uploaded transcripts. ' : ''}
+        {view && readiness && (problems.length > 0 || !llmLabel || !view.zoom.connected) && (
+          <div className="mb-4 text-[11px] text-zinc-600 dark:text-zinc-400 bg-zinc-50 dark:bg-zinc-900/60 rounded-lg p-3 space-y-1">
+            {agentMode
+              ? <p className="font-semibold text-zinc-700 dark:text-zinc-300">Requirements are extracted by your agent ({readiness.agentLabel ?? agentLabel}) with the Meeting Requirements extension.</p>
+              : !llmLabel && <p>No AI provider key yet for direct mode.</p>}
+            {problems.map(p => {
+              const target = fixTarget(p);
+              return (
+                <p key={p} className="flex items-start gap-1.5">
+                  <AlertTriangle size={11} className="mt-0.5 shrink-0 text-amber-500" />
+                  <span>{p}{target && onNavigate && <> <button onClick={() => onNavigate(target)} className="underline font-semibold">Open {target === 'mcp' ? 'MCP Tools' : target === 'agents' ? 'Agents' : 'Extensions'}</button></>}</span>
+                </p>
+              );
+            })}
+            {!view.zoom.connected && <p>Zoom isn’t connected — you can still import uploaded transcripts.</p>}
             <button onClick={() => setTab('settings')} className="underline font-semibold">Open settings</button>
-          </p>
+          </div>
         )}
 
         {features.length > 0 && (
@@ -275,7 +314,7 @@ export const RequirementsSection: React.FC<Props> = ({ agentConfig, agentLabel, 
 
       <MeetingImportModal
         isOpen={importOpen}
-        zoomConnected={!!view?.zoom.connected}
+        zoomConnected={zoomReady}
         llmLabel={llmLabel}
         onClose={() => setImportOpen(false)}
         onImported={async (id, d) => { await loadSets(); setSetId(id); setDoc(d); }}

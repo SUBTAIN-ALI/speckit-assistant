@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Plug, Plus, Pencil, Trash2 } from 'lucide-react';
-import { McpFile, McpServer } from '../domain/models/mcp';
+import { Plug, Plus, Pencil, Trash2, Video } from 'lucide-react';
+import { McpFile, McpServer, ZOOM_MCP_PRESET, isZoomMcpServer } from '../domain/models/mcp';
 import { McpServerEditorModal } from './McpServerEditorModal';
 
 type McpPanelProps = {
@@ -45,12 +45,23 @@ export const McpPanel: React.FC<McpPanelProps> = ({ mcpFile, onSave }) => {
             Define MCP servers once; assign them to agents and apply to each CLI's native config from the Agents section.
           </p>
         </div>
+        <div className="flex items-center gap-2">
+        {!servers.some(isZoomMcpServer) && (
+          <button
+            onClick={() => onSave({ servers: [...servers, { ...ZOOM_MCP_PRESET }] })}
+            className="flex items-center gap-1.5 px-3 py-2 border border-zinc-200 dark:border-zinc-800 rounded-lg text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900 transition"
+            title="Add Zoom's official Meetings MCP server; the token comes from the Zoom sign-in in Requirements → Settings"
+          >
+            <Video size={14} /> Add Zoom
+          </button>
+        )}
         <button
           onClick={() => { setCreating(true); setEditing(null); }}
           className="flex items-center gap-1.5 px-3 py-2 bg-black dark:bg-white text-white dark:text-black rounded-lg text-xs font-semibold hover:opacity-90 transition"
         >
           <Plus size={14} /> New Server
         </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">

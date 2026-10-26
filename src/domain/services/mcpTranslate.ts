@@ -8,6 +8,7 @@ import { McpServer } from '../models/mcp';
 type ServerMap = Record<string, any>;
 
 const hasEnv = (s: McpServer) => s.env && Object.keys(s.env).length > 0;
+const hasHeaders = (s: McpServer) => s.headers && Object.keys(s.headers).length > 0;
 const hasArgs = (s: McpServer) => Array.isArray(s.args) && s.args.length > 0;
 
 // --- Claude Code (.mcp.json) ---
@@ -19,8 +20,8 @@ function claudeEntry(s: McpServer): any {
       ...(hasEnv(s) ? { env: s.env } : {}),
     };
   }
-  // http | sse — Claude uses an explicit type + url
-  return { type: s.transport, url: s.url };
+  // http | sse — Claude uses an explicit type + url (+ headers, ${VAR}-expanded)
+  return { type: s.transport, url: s.url, ...(hasHeaders(s) ? { headers: s.headers } : {}) };
 }
 
 export function toClaudeMcp(servers: McpServer[]): ServerMap {
@@ -39,7 +40,8 @@ function geminiEntry(s: McpServer): any {
     };
   }
   // Gemini uses httpUrl for streamable HTTP and url for SSE.
-  return s.transport === 'http' ? { httpUrl: s.url } : { url: s.url };
+  const headers = hasHeaders(s) ? { headers: s.headers } : {};
+  return s.transport === 'http' ? { httpUrl: s.url, ...headers } : { url: s.url, ...headers };
 }
 
 export function toGeminiServers(servers: McpServer[]): ServerMap {

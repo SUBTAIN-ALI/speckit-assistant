@@ -1,0 +1,28 @@
+schema_version: "1.0"
+
+extension:
+  id: "meetings"
+  name: "Spec Kit Meeting Requirements"
+  version: "1.0.0"
+  description: "Turns meetings (Zoom via MCP, or a transcript) into reviewable requirements, and groups accepted requirements into features."
+  author: "speckit-assistant"
+  repository: "https://github.com/dmux/speckit-assistant"
+  license: "MIT"
+
+requires:
+  speckit_version: ">=0.1.0"
+
+# Commands are invoked on demand from the speckit-assistant Requirements section
+# (and its CLI) — they are NOT wired as lifecycle hooks (no `hooks:` block). The
+# command namespace must equal the extension id (speckit.<id>.<command>).
+# Both commands write JSON files that the app validates before using them.
+provides:
+  commands:
+    - name: "speckit.meetings.import"
+      file: "commands/import.md"
+      description: "Extract requirements from a meeting (Zoom MCP or transcript.md) into extraction.json."
+    - name: "speckit.meetings.group"
+      file: "commands/group.md"
+      description: "Group accepted requirements into Spec Kit features in grouping.json."
+
+tags: ["requirements", "meetings", "zoom", "mcp", "discovery"]

@@ -4,7 +4,9 @@ import * as path from 'path';
 import * as fs from 'fs';
 import open from 'open';
 import * as os from 'os';
-import { workflowService } from '../adapters/di';
+import { workflowService, meetingImportService, requirementsService, featureCreationService, agentRepository } from '../adapters/di';
+import { activeAgent, toAgentConfig } from '../domain/models/agents';
+import { FeatureGroup, slugify } from '../domain/services/featureGrouping';
 import { WorkflowPhase, AgentConfig, AgentType } from '../domain/models/types';
 
 const args = process.argv.slice(2);
@@ -67,7 +69,7 @@ const appDir = path.resolve(__dirname, '../..');
 const workspacePath = resolveWorkspace(args, appDir);
 process.env.WORKSPACE_PATH = workspacePath;
 
-const subcommands = ['status', 'approve', 'discard', 'run', 'create', 'delete'];
+const subcommands = ['status', 'approve', 'discard', 'run', 'create', 'delete', 'import', 'requirements', 'create-features'];
 const firstArg = args[0];
 
 // Help menu
@@ -82,6 +84,9 @@ Usage:
   speckit-assistant discard <phase> [feature]   Reset/discard a phase
   speckit-assistant create <feature>  Create a new feature folder
   speckit-assistant delete <feature>  Delete a feature folder
+  speckit-assistant import <file|zoom-link> [--title <name>]   Import a meeting into a new requirement list
+  speckit-assistant requirements [list]                        List requirement lists, or one list's requirements
+  speckit-assistant create-features <list> [--single] [--all]  Create Spec Kit features from accepted requirements
   speckit-assistant run <phase> [feature] [--agent <type>] [--prompt <text>]  Run an agent phase
 
 Options:
@@ -182,8 +187,17 @@ async function handleSubcommand(command: string, cmdArgs: string[]) {
       case 'run':
         await runPhase(cmdArgs);
         break;
+      case 'import':
+        await importMeeting(cmdArgs);
+        break;
+      case 'requirements':
+        await listRequirements(cmdArgs);
+        break;
+      case 'create-features':
+        await createFeaturesFromRequirements(cmdArgs);
+        break;
     }
-    process.exit(0);
+    process.exit(typeof process.exitCode === 'number' ? process.exitCode : 0);
   } catch (err: any) {
     console.error(`\n❌ Error: ${err.message}`);
     process.exit(1);
@@ -262,6 +276,77 @@ async function discardPhase(cmdArgs: string[]) {
   console.log(`Discarding/resetting phase "${phase}"${feature ? ` for feature "${feature}"` : ''}...`);
   await workflowService.discardPhase(workspacePath, phase, feature);
   console.log('✅ Discarded/reset successfully!');
+}
+
+// --- Meeting → requirements → features (same services as the Requirements section) ---
+
+// A function declaration (not a const) so it's available to handleSubcommand,
+// which runs while this module is still being evaluated.
+function flagValue(cmdArgs: string[], flag: string): string | undefined {
+  const i = cmdArgs.indexOf(flag);
+  return i !== -1 ? cmdArgs[i + 1] : undefined;
+}
+
+async function importMeeting(cmdArgs: string[]) {
+  const source = cmdArgs[0];
+  if (!source) throw new Error('Usage: import <transcript-file | zoom-link | meeting-id> [--title <name>]');
+  const title = flagValue(cmdArgs, '--title');
+  const input = fs.existsSync(source) && fs.statSync(source).isFile()
+    ? { type: 'transcript' as const, text: fs.readFileSync(source, 'utf-8'), filename: path.basename(source) }
+    : { type: 'link' as const, value: source };
+  console.log(`Importing ${input.type === 'transcript' ? input.filename : source}...`);
+  const out = await meetingImportService.import({ workspacePath, input, title }, p => console.log(`  · ${p.message}`));
+  if (out.status !== 'ok') throw new Error(out.message);
+  console.log(`✅ ${out.message}`);
+  console.log(`   List: ${out.setId}  (speckit-assistant requirements ${out.setId})`);
+}
+
+async function listRequirements(cmdArgs: string[]) {
+  const setId = cmdArgs[0] && !cmdArgs[0].startsWith('-') ? cmdArgs[0] : null;
+  if (!setId) {
+    const sets = await requirementsService.list(workspacePath);
+    if (sets.length === 0) return console.log('No requirement lists yet. Run: speckit-assistant import <file>');
+    for (const s of sets) console.log(`${s.id}  ${s.title}  (${s.total} req, ${s.accepted} accepted, ${s.linked} in features)`);
+    return;
+  }
+  const doc = await requirementsService.get(workspacePath, setId);
+  if (!doc) throw new Error(`Requirement list not found: ${setId}`);
+  console.log(`\n${doc.meta.title ?? setId}\n`);
+  for (const r of doc.requirements) {
+    console.log(`${r.id} [${r.status}] (${r.type}, ${r.priority}) ${r.title}${r.feature ? `  → ${r.feature}` : ''}`);
+  }
+}
+
+async function createFeaturesFromRequirements(cmdArgs: string[]) {
+  const setId = cmdArgs[0];
+  if (!setId) throw new Error('Usage: create-features <list> [--single] [--all]');
+  const doc = await requirementsService.get(workspacePath, setId);
+  if (!doc) throw new Error(`Requirement list not found: ${setId}`);
+  // --all includes drafts; by default only accepted requirements are built.
+  const ids = doc.requirements
+    .filter(r => !r.feature && (cmdArgs.includes('--all') ? r.status !== 'rejected' : r.status === 'accepted'))
+    .map(r => r.id);
+  if (ids.length === 0) throw new Error('No accepted requirements left to build (accept some, or pass --all).');
+
+  let groups: FeatureGroup[];
+  if (cmdArgs.includes('--single')) {
+    const title = doc.meta.title || setId;
+    groups = [{ name: slugify(title) || 'feature', title, requirementIds: ids }];
+  } else {
+    console.log(`Suggesting features for ${ids.length} requirement(s)...`);
+    groups = (await featureCreationService.proposeGrouping(workspacePath, setId, ids)).groups;
+  }
+  for (const g of groups) console.log(`  • ${g.title} (${g.name}): ${g.requirementIds.join(', ')}`);
+
+  const agent = activeAgent(await agentRepository.getAgents(workspacePath));
+  if (!agent) throw new Error('No agent configured. Add one in the Agents section.');
+  const result = await featureCreationService.createFeatures(workspacePath, setId, groups, toAgentConfig(agent), e => {
+    if (e.type === 'start') console.log(`\n▶ ${e.title} → specs/${e.feature}`);
+    else if (e.type === 'log') process.stdout.write(e.text);
+    else if (e.type === 'done') console.log(`\n${e.ok ? '✅' : '❌'} ${e.message}`);
+  });
+  console.log(`\nCreated: ${result.created.join(', ') || 'none'}${result.failed.length ? `   Failed: ${result.failed.join(', ')}` : ''}`);
+  if (result.failed.length) process.exitCode = 1;
 }
 
 async function createFeature(cmdArgs: string[]) {

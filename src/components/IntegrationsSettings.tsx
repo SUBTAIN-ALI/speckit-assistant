@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { KeyRound, Video, Check, Copy, Loader2, Unplug, Plug, RefreshCw, ExternalLink, AlertTriangle } from 'lucide-react';
+import { KeyRound, Video, Check, Copy, Loader2, Unplug, Plug, RefreshCw, ExternalLink, AlertTriangle, Bot, Zap } from 'lucide-react';
 import { zoomRedirectUriFor } from '../lib/zoomRedirect';
 import {
   IntegrationsView,
@@ -197,6 +197,14 @@ export const IntegrationsSettings: React.FC<Props> = ({ view, onChange }) => {
     }
   };
 
+  const setEngine = async (engine: 'agent' | 'direct') => {
+    try {
+      onChange(await call<IntegrationsView>('/api/settings/integrations', { method: 'PUT', body: JSON.stringify({ engine }) }));
+    } catch (err: any) {
+      setLlmMsg({ ok: false, text: err.message });
+    }
+  };
+
   const Msg = ({ m }: { m: { ok: boolean; text: string } | null }) =>
     m ? (
       <p role="status" className={`mt-3 text-[11px] flex items-start gap-1.5 ${m.ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
@@ -205,11 +213,29 @@ export const IntegrationsSettings: React.FC<Props> = ({ view, onChange }) => {
       </p>
     ) : null;
 
+  const engineBtn = (active: boolean) => `flex-1 text-left p-3 rounded-lg border transition ${active ? 'border-blue-500 bg-blue-500/5' : 'border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900'}`;
+
   return (
     <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 max-w-6xl">
+      {/* Who extracts requirements and groups features */}
+      <section className="xl:col-span-2 p-5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950">
+        <h3 className="text-sm font-bold text-zinc-900 dark:text-white">Requirements engine</h3>
+        <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-1">Who turns meetings into requirements and suggests features. Specs are always written by your agent through Spec Kit.</p>
+        <div className="mt-3 flex flex-col sm:flex-row gap-3" role="radiogroup" aria-label="Requirements engine">
+          <button role="radio" aria-checked={view.engine === 'agent'} className={engineBtn(view.engine === 'agent')} onClick={() => setEngine('agent')}>
+            <span className="text-xs font-semibold flex items-center gap-1.5"><Bot size={13} /> Your agent (recommended)</span>
+            <span className="block text-[11px] text-zinc-500 mt-0.5">The active agent runs the Meeting Requirements extension (/speckit.meetings.*), with Zoom from MCP Tools — like every other workflow run. No API key needed.</span>
+          </button>
+          <button role="radio" aria-checked={view.engine === 'direct'} className={engineBtn(view.engine === 'direct')} onClick={() => setEngine('direct')}>
+            <span className="text-xs font-semibold flex items-center gap-1.5"><Zap size={13} /> Direct API (faster)</span>
+            <span className="block text-[11px] text-zinc-500 mt-0.5">This app calls OpenAI, Claude or Gemini with your API key below and reads Zoom itself. Seconds instead of an agent run.</span>
+          </button>
+        </div>
+      </section>
+
       {/* AI provider */}
       <section className="p-5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950">
-        <h3 className="text-sm font-bold text-zinc-900 dark:text-white flex items-center gap-2"><KeyRound size={15} /> AI provider</h3>
+        <h3 className="text-sm font-bold text-zinc-900 dark:text-white flex items-center gap-2"><KeyRound size={15} /> AI provider <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-900 text-zinc-500">{view.engine === 'direct' ? 'in use' : 'direct mode only'}</span></h3>
         <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-1">
           Your own API key turns meeting transcripts into requirements. Keys are stored only on this computer
           (<code className="font-mono">~/.speckit-assistant/credentials.json</code>) and never sent anywhere except the provider.
@@ -289,6 +315,7 @@ export const IntegrationsSettings: React.FC<Props> = ({ view, onChange }) => {
         </div>
         <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-1">
           Uses your own Zoom app to read transcripts and AI summaries of meetings in your account through Zoom’s MCP server. Read-only.
+          {view.engine === 'agent' && <> In agent mode, also add Zoom in <b>MCP Tools</b> (“Add Zoom”) and assign it to your agent in <b>Agents</b>; the sign-in here supplies its token.</>}
         </p>
 
         <details className="mt-3 text-[11px] text-zinc-600 dark:text-zinc-400 rounded-lg bg-zinc-50 dark:bg-zinc-900/60 p-3" open={!view.zoom.clientId}>
