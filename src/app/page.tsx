@@ -30,6 +30,7 @@ import ExtensionsPanel, { type ExtensionAction } from '@/components/ExtensionsPa
 import AboutModal, { APP_VERSION } from '@/components/AboutModal';
 import ExecutionsView from '@/components/ExecutionsView';
 import RequirementsSection from '@/components/RequirementsSection';
+import WorkspaceSwitcher from '@/components/WorkspaceSwitcher';
 import { isWorkflowState } from '@/lib/workflowState';
 import { AgentsFile, DEFAULT_AGENTS, toAgentConfig, activeAgent } from '@/domain/models/agents';
 import { McpFile, DEFAULT_MCP } from '@/domain/models/mcp';
@@ -898,7 +899,7 @@ export default function Dashboard() {
                 v{APP_VERSION}
               </button>
             </div>
-            <p className="text-[10px] text-zinc-400 font-mono">WORKSPACE: {state ? 'ACTIVE' : 'CONNECTING...'}</p>
+            <WorkspaceSwitcher busy={running || runningDevOps !== null} />
           </div>
         </div>
 

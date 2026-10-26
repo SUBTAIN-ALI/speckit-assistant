@@ -3,13 +3,13 @@ import { spawn } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import open from 'open';
-import * as os from 'os';
 import { workflowService, meetingImportService, requirementsService, featureCreationService, agentRepository } from '../adapters/di';
 import { activeAgent, toAgentConfig } from '../domain/models/agents';
 import { FeatureGroup, slugify } from '../domain/services/featureGrouping';
 import { WorkflowPhase, AgentConfig, AgentType } from '../domain/models/types';
 import { ImportInput } from '../domain/services/MeetingImportService';
 import { isAudioFilename } from '../domain/services/transcript';
+import { readWorkspaceConfig, saveCurrentWorkspace } from '../adapters/secondary/fs/workspaceConfig';
 
 const args = process.argv.slice(2);
 
@@ -46,25 +46,11 @@ function resolveWorkspace(cmdArgs: string[], projectDir: string): string {
 }
 
 function loadWorkspacePath(projectDir: string): string | null {
-  try {
-    const configPath = path.join(os.homedir(), '.speckit-assistant-config.json');
-    if (fs.existsSync(configPath)) {
-      const data = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-      return data.lastWorkspacePath || null;
-    }
-  } catch {
-    // ignore
-  }
-  return null;
+  return readWorkspaceConfig().lastWorkspacePath || null;
 }
 
 function saveWorkspacePath(projectDir: string, resolvedPath: string) {
-  try {
-    const configPath = path.join(os.homedir(), '.speckit-assistant-config.json');
-    fs.writeFileSync(configPath, JSON.stringify({ lastWorkspacePath: resolvedPath }, null, 2), 'utf-8');
-  } catch {
-    // ignore
-  }
+  saveCurrentWorkspace(resolvedPath);
 }
 
 const appDir = path.resolve(__dirname, '../..');

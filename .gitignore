@@ -48,3 +48,6 @@ Thumbs.db
 .speckit-assistant-config.json
 tmp-test-workspace/
 tmp-api-test-workspace/
+
+# Meeting transcripts and requirements (speckit-assistant) — kept local
+.specify/meetings/
