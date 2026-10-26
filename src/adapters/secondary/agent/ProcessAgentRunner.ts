@@ -29,6 +29,24 @@ const PHASE_COMMANDS: Record<WorkflowPhase, string> = {
 // referenced as ${ZOOM_MEETINGS_MCP_ACCESS_TOKEN} by MCP server headers.
 export type AgentEnvProvider = () => Promise<Record<string, string>>;
 
+// How Spec Kit commands are invoked in a workspace. Spec Kit records it in
+// .specify/integration.json: older installs (and most agents) use "." —
+// "/speckit.specify" — while Spec Kit ≥1.2 with Claude installs skills invoked
+// as "/speckit-specify". Commands are authored in the dotted form and adapted.
+export function speckitInvocation(workspacePath: string, slash: string): string {
+  if (!slash.startsWith("/speckit.")) return slash;
+  let sep = ".";
+  try {
+    const cfg = JSON.parse(fs.readFileSync(path.join(workspacePath, ".specify", "integration.json"), "utf-8"));
+    const active = cfg?.integration ?? cfg?.default_integration;
+    const configured = cfg?.integration_settings?.[active]?.invoke_separator;
+    if (typeof configured === "string" && configured) sep = configured;
+  } catch {
+    // no integration.json (older Spec Kit): keep the dotted form
+  }
+  return sep === "." ? slash : `/${slash.slice(1).split(".").join(sep)}`;
+}
+
 export class ProcessAgentRunner implements AgentRunnerPort {
   private activeProcesses = new Map<string, pty.IPty>();
 
@@ -121,7 +139,7 @@ export class ProcessAgentRunner implements AgentRunnerPort {
   ): Promise<number> {
     const specArg =
       phase !== "constitution" && featureName ? `specs/${featureName}` : null;
-    const slashCmd = `${PHASE_COMMANDS[phase]}${specArg ? ` ${specArg}` : ""}`;
+    const slashCmd = `${speckitInvocation(workspacePath, PHASE_COMMANDS[phase])}${specArg ? ` ${specArg}` : ""}`;
 
     const context = userPrompt?.trim();
     const fullPrompt = context ? `${context}\n\n${slashCmd}` : slashCmd;
@@ -129,6 +147,7 @@ export class ProcessAgentRunner implements AgentRunnerPort {
     return this.spawnAgent({
       workspacePath,
       procKey: this.phaseKey(featureName, phase),
+      feature: phase !== "constitution" ? featureName : null,
       doneTag: phase,
       agentConfig,
       fullPrompt,
@@ -146,11 +165,12 @@ export class ProcessAgentRunner implements AgentRunnerPort {
     onCost?: (cost: CostMetadata) => void,
   ): Promise<number> {
     // Personas always operate on a specific feature's artifacts.
-    const fullPrompt = `${persona.command} specs/${featureName}`;
+    const fullPrompt = `${speckitInvocation(workspacePath, persona.command)} specs/${featureName}`;
 
     return this.spawnAgent({
       workspacePath,
       procKey: this.personaKey(featureName, persona.id),
+      feature: featureName,
       doneTag: `persona:${persona.id}`,
       agentConfig,
       fullPrompt,
@@ -170,12 +190,13 @@ export class ProcessAgentRunner implements AgentRunnerPort {
   ): Promise<number> {
     // DevOps agents target a feature's artifacts when one is active, else run
     // workspace-wide. The leading slash mirrors how phases/personas invoke commands.
-    const slash = agent.command.startsWith("/") ? agent.command : `/${agent.command}`;
+    const slash = speckitInvocation(workspacePath, agent.command.startsWith("/") ? agent.command : `/${agent.command}`);
     const fullPrompt = featureName ? `${slash} specs/${featureName}` : slash;
 
     return this.spawnAgent({
       workspacePath,
       procKey: this.devopsKey(featureName, agent.id),
+      feature: featureName,
       doneTag: `devops:${agent.id}`,
       agentConfig,
       fullPrompt,
@@ -192,7 +213,7 @@ export class ProcessAgentRunner implements AgentRunnerPort {
     onData?: (text: string) => void,
     onCost?: (cost: CostMetadata) => void,
   ): Promise<number> {
-    const slash = command.command.startsWith("/") ? command.command : `/${command.command}`;
+    const slash = speckitInvocation(workspacePath, command.command.startsWith("/") ? command.command : `/${command.command}`);
     const slashCmd = command.args ? `${slash} ${command.args}` : slash;
     const context = command.context?.trim();
     return this.spawnAgent({
@@ -221,6 +242,10 @@ export class ProcessAgentRunner implements AgentRunnerPort {
     persona?: PersonaConfig;
     devops?: DevOpsAgent;
     restricted?: AgentCommand["restricted"];
+    // Feature the run is about. Spec Kit scripts resolve the feature directory
+    // from SPECIFY_FEATURE_DIRECTORY first (else the last-specified feature in
+    // .specify/feature.json, which is wrong with several features in flight).
+    feature?: string | null;
   }): Promise<number> {
     const { workspacePath, procKey, doneTag, agentConfig, fullPrompt, onData, onCost } =
       opts;
@@ -271,6 +296,9 @@ export class ProcessAgentRunner implements AgentRunnerPort {
         env: {
           ...process.env,
           ...extraEnv,
+          ...(opts.feature
+            ? { SPECIFY_FEATURE_DIRECTORY: `specs/${opts.feature}`, SPECIFY_FEATURE: opts.feature }
+            : {}),
           TERM: "xterm-256color",
           ...(opts.persona
             ? {

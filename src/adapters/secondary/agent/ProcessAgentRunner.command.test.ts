@@ -85,3 +85,60 @@ describe('ProcessAgentRunner.runCommand', () => {
     expect(lastEnv().ZOOM_MEETINGS_MCP_ACCESS_TOKEN).toBeUndefined();
   });
 });
+
+describe('Spec Kit compatibility', () => {
+  const fs = require('fs') as typeof import('fs');
+  const os = require('os') as typeof import('os');
+  const path = require('path') as typeof import('path');
+  let mockPty: any;
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockPty = loadPty().spawn('dummy', []);
+    (loadPty().spawn as any).mockClear();
+  });
+  const finish = async (p: Promise<number>) => {
+    await vi.waitFor(() => expect(loadPty().spawn).toHaveBeenCalled());
+    mockPty._exitCallback({ exitCode: 0 });
+    return p;
+  };
+  const workspace = (integration?: object) => {
+    const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'speckit-invoke-'));
+    if (integration) {
+      fs.mkdirSync(path.join(ws, '.specify'));
+      fs.writeFileSync(path.join(ws, '.specify', 'integration.json'), JSON.stringify(integration));
+    }
+    return ws;
+  };
+  const skills = { integration: 'claude', integration_settings: { claude: { script: 'sh', invoke_separator: '-' } } };
+
+  it('maps commands to the workspace’s invoke separator', async () => {
+    const { speckitInvocation } = await import('./ProcessAgentRunner');
+    const modern = workspace(skills);
+    expect(speckitInvocation(modern, '/speckit.specify')).toBe('/speckit-specify');
+    expect(speckitInvocation(modern, '/speckit.meetings.import')).toBe('/speckit-meetings-import');
+    expect(speckitInvocation(modern, '/custom.thing')).toBe('/custom.thing');
+    expect(speckitInvocation(workspace(), '/speckit.specify')).toBe('/speckit.specify');
+    expect(speckitInvocation(workspace({ integration: 'copilot', integration_settings: {} }), '/speckit.plan')).toBe('/speckit.plan');
+  });
+
+  it('uses the mapped names for phases, personas and commands, and scopes runs to the feature', async () => {
+    const ws = workspace(skills);
+    const runner = new ProcessAgentRunner();
+    await finish(runner.runPhase(ws, 'planning', '002-promo-codes', { agentType: 'claude' }, 'notes'));
+    const call = (loadPty().spawn as any).mock.calls.at(-1);
+    expect(call[1][2]).toContain('/speckit-plan specs/002-promo-codes');
+    expect(call[2].env).toMatchObject({ SPECIFY_FEATURE_DIRECTORY: 'specs/002-promo-codes', SPECIFY_FEATURE: '002-promo-codes' });
+
+    (loadPty().spawn as any).mockClear();
+    await finish(runner.runPersona(ws, '002-promo-codes', { id: 'qa', label: 'QA', command: '/speckit.personas.qa', enabled: true }, { agentType: 'claude' }));
+    expect((loadPty().spawn as any).mock.calls.at(-1)[1][2]).toContain('/speckit-personas-qa specs/002-promo-codes');
+
+    (loadPty().spawn as any).mockClear();
+    await finish(runner.runPhase(ws, 'constitution', null, { agentType: 'claude' }));
+    expect((loadPty().spawn as any).mock.calls.at(-1)[2].env.SPECIFY_FEATURE_DIRECTORY).toBeUndefined();
+
+    (loadPty().spawn as any).mockClear();
+    await finish(runner.runCommand(ws, { key: 'k', command: '/speckit.meetings.group', args: 'd', restricted: { allowedTools: ['Read'], mcpServers: {} } }, { agentType: 'claude' }));
+    expect((loadPty().spawn as any).mock.calls.at(-1)[1][2]).toContain("'--' '/speckit-meetings-group d'");
+  });
+});
