@@ -16,7 +16,7 @@ export async function GET(req: Request) {
   const local = isAllowedHost(req.headers.get('host')) ? appOrigin(req) : undefined;
   const origin = (await zoomAuth.pendingReturnOrigin().catch(() => undefined)) ?? local;
   if (!origin) {
-    return new NextResponse('Zoom sign-in finished. Return to Speckit Assistant on this computer.', { status: 200, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
+    return new NextResponse('Zoom sign-in finished. Return to Spec Rabbit on this computer.', { status: 200, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
   }
   const back = (q: Record<string, string>) =>
     NextResponse.redirect(`${origin}/?${new URLSearchParams({ section: 'requirements', ...q })}`);

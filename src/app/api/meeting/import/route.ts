@@ -3,7 +3,7 @@ import { meetingImportService } from '../../../../adapters/di';
 import { getWorkspacePath } from '../../../../adapters/primary/api/utils';
 import { sseResponse } from '../../../../adapters/primary/api/sse';
 import { ImportInput } from '../../../../domain/services/MeetingImportService';
-import { isAudioFilename } from '../../../../domain/services/transcript';
+import { MAX_DOCUMENT_BYTES, documentTooLarge, isAudioFilename, isDocumentFilename } from '../../../../domain/services/transcript';
 
 // 5 MB is far more than a multi-hour transcript; anything bigger is a wrong file.
 const MAX_TRANSCRIPT_BYTES = 5 * 1024 * 1024;
@@ -13,7 +13,7 @@ const MAX_RECORDING_BYTES = 500 * 1024 * 1024;
 // Streams progress as SSE: `progress` events, then one `done` with the outcome.
 // The import continues if the client disconnects.
 //   JSON { link | transcript, filename?, title? }
-//   multipart/form-data { file (a recording), title? } → transcribed first
+//   multipart/form-data { file (a recording or a document), title? } → transcribed / converted first
 export async function POST(req: Request) {
   try {
     let input: ImportInput;
@@ -22,12 +22,16 @@ export async function POST(req: Request) {
       const form = await req.formData();
       const file = form.get('file');
       title = form.get('title');
-      if (!(file instanceof File)) return NextResponse.json({ error: 'Attach a recording file.' }, { status: 400 });
-      if (!isAudioFilename(file.name)) {
-        return NextResponse.json({ error: `${file.name} isn’t a recording. Upload the .m4a or .mp4 from the Zoom folder, or a .vtt/.txt transcript.` }, { status: 400 });
+      if (!(file instanceof File)) return NextResponse.json({ error: 'Attach a recording or a document.' }, { status: 400 });
+      if (isAudioFilename(file.name)) {
+        if (file.size > MAX_RECORDING_BYTES) return NextResponse.json({ error: 'That recording is too large (max 500 MB).' }, { status: 413 });
+        input = { type: 'audio', data: Buffer.from(await file.arrayBuffer()), filename: file.name };
+      } else if (isDocumentFilename(file.name)) {
+        if (file.size > MAX_DOCUMENT_BYTES) return NextResponse.json({ error: documentTooLarge(file.name, file.size) }, { status: 413 });
+        input = { type: 'document', data: Buffer.from(await file.arrayBuffer()), filename: file.name };
+      } else {
+        return NextResponse.json({ error: `${file.name} isn’t a recording or a supported document. Upload a PDF, Word, PowerPoint, Excel or OpenDocument file, a .m4a/.mp4 recording, or a .vtt/.txt/.md transcript.` }, { status: 400 });
       }
-      if (file.size > MAX_RECORDING_BYTES) return NextResponse.json({ error: 'That recording is too large (max 500 MB).' }, { status: 413 });
-      input = { type: 'audio', data: Buffer.from(await file.arrayBuffer()), filename: file.name };
     } else {
       const body = await req.json();
       const { link, transcript, filename } = body;
@@ -40,7 +44,7 @@ export async function POST(req: Request) {
       } else if (typeof link === 'string') {
         input = { type: 'link', value: link };
       } else {
-        return NextResponse.json({ error: 'Provide a Zoom link, a transcript or a recording.' }, { status: 400 });
+        return NextResponse.json({ error: 'Provide a Zoom link, a transcript, a recording or a document.' }, { status: 400 });
       }
     }
 

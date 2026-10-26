@@ -50,7 +50,7 @@ function forbiddenHostPage(req: NextRequest): NextResponse {
   const name = hostnameOf(host).replace(/[<>&"]/g, '');
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>Local access only</title>
 <style>body{font:14px/1.5 system-ui,sans-serif;max-width:560px;margin:15vh auto;padding:0 16px;color:#18181b}code{background:#f4f4f5;padding:2px 5px;border-radius:4px}</style></head>
-<body><h1 style="font-size:18px">Speckit Assistant only accepts local connections</h1>
+<body><h1 style="font-size:18px">Spec Rabbit only accepts local connections</h1>
 <p>It can run agent CLIs and holds your API keys, so it isn’t served on network addresses like <code>${name}</code>.</p>
 <p>Open <a href="${local}">${local}</a> on this computer instead.</p>
 <p>To allow this address anyway (e.g. a dev container), restart with <code>SPECKIT_ALLOWED_HOSTS=${name}</code>.</p></body></html>`;

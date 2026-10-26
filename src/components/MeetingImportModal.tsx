@@ -4,7 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { X, Video, Upload, Loader2, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { ImportProgress, ImportStatus } from '../domain/models/meeting';
 import { RequirementsDoc } from '../domain/models/requirements';
-import { AUDIO_EXTENSIONS, isAudioFilename } from '../domain/services/transcript';
+import { AUDIO_EXTENSIONS, DOCUMENT_EXTENSIONS, MAX_DOCUMENT_BYTES, documentTooLarge, isAudioFilename, isDocumentFilename } from '../domain/services/transcript';
 
 type Props = {
   isOpen: boolean;
@@ -22,8 +22,9 @@ export const MeetingImportModal: React.FC<Props> = ({ isOpen, zoomConnected, llm
   const [tab, setTab] = useState<'zoom' | 'file'>(zoomConnected ? 'zoom' : 'file');
   const [link, setLink] = useState('');
   const [title, setTitle] = useState('');
-  // A transcript is read as text; a recording is sent as-is and transcribed on the server.
-  const [file, setFile] = useState<{ name: string; text?: string; recording?: File } | null>(null);
+  // A transcript is read as text; a recording or document is sent as-is and
+  // transcribed / converted on the server.
+  const [file, setFile] = useState<{ name: string; text?: string; upload?: { kind: 'recording' | 'document'; file: File } } | null>(null);
   const [running, setRunning] = useState(false);
   const [log, setLog] = useState<ImportProgress[]>([]);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
@@ -54,7 +55,16 @@ export const MeetingImportModal: React.FC<Props> = ({ isOpen, zoomConnected, llm
   const pickFile = async (f: File | undefined) => {
     reset();
     if (!f) return setFile(null);
-    setFile(isAudioFilename(f.name) ? { name: f.name, recording: f } : { name: f.name, text: await f.text() });
+    if (isAudioFilename(f.name)) setFile({ name: f.name, upload: { kind: 'recording', file: f } });
+    else if (isDocumentFilename(f.name)) {
+      if (f.size > MAX_DOCUMENT_BYTES) {
+        setFile(null);
+        setOutcome({ status: 'invalid_input', message: documentTooLarge(f.name, f.size) });
+        return;
+      }
+      setFile({ name: f.name, upload: { kind: 'document', file: f } });
+    }
+    else setFile({ name: f.name, text: await f.text() });
   };
 
   const start = async () => {
@@ -64,9 +74,9 @@ export const MeetingImportModal: React.FC<Props> = ({ isOpen, zoomConnected, llm
     abortRef.current = controller;
     try {
       let res: Response;
-      if (tab === 'file' && file?.recording) {
+      if (tab === 'file' && file?.upload) {
         const form = new FormData();
-        form.append('file', file.recording);
+        form.append('file', file.upload.file);
         if (title) form.append('title', title);
         res = await fetch('/api/meeting/import', { method: 'POST', body: form, signal: controller.signal });
       } else {
@@ -124,7 +134,7 @@ export const MeetingImportModal: React.FC<Props> = ({ isOpen, zoomConnected, llm
       <div className="w-full max-w-lg rounded-xl bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 shadow-xl">
         <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-200 dark:border-zinc-800">
           <div>
-            <h3 id="import-title" className="text-sm font-bold text-zinc-900 dark:text-white">Import requirements from a meeting</h3>
+            <h3 id="import-title" className="text-sm font-bold text-zinc-900 dark:text-white">Import requirements</h3>
             <p className="text-[11px] text-zinc-500 mt-0.5">Creates a new requirement list{llmLabel ? ` · using ${llmLabel}` : ''}</p>
           </div>
           <button onClick={close} className="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-900" aria-label="Close"><X size={15} /></button>
@@ -159,26 +169,32 @@ export const MeetingImportModal: React.FC<Props> = ({ isOpen, zoomConnected, llm
               </div>
             ) : (
               <p className="text-[11px] text-zinc-600 dark:text-zinc-400 bg-zinc-50 dark:bg-zinc-900/60 rounded-lg p-3">
-                Zoom isn’t connected. <button onClick={onOpenSettings} className="underline font-semibold">Connect Zoom in settings</button>, or upload a transcript file instead.
+                Zoom isn’t connected. <button onClick={onOpenSettings} className="underline font-semibold">Connect Zoom in settings</button>, or upload a transcript, recording or document under File instead.
               </p>
             )
           ) : (
             <label className="flex flex-col items-center justify-center gap-1.5 px-4 py-6 rounded-lg border-2 border-dashed border-zinc-200 dark:border-zinc-800 cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-900/60 text-center">
               <Upload size={18} className="text-zinc-400" />
               <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-                {file ? `${file.name}${file.recording ? ` · ${(file.recording.size / 1024 / 1024).toFixed(1)} MB` : ''}` : 'Choose a transcript or a recording'}
+                {file ? `${file.name}${file.upload ? ` · ${(file.upload.file.size / 1024 / 1024).toFixed(1)} MB` : ''}` : 'Choose a transcript, recording or document'}
               </span>
               <span className="text-[10px] text-zinc-500">
-                {file?.recording
+                {file?.upload?.kind === 'recording'
                   ? 'Transcribed with your OpenAI key first (about $0.006 per minute), then requirements are extracted.'
-                  : 'Transcript: .vtt or .txt · Recording: .m4a, .mp4, .mp3 or .wav (e.g. Documents/Zoom/<meeting>/audio….m4a)'}
+                  : file?.upload?.kind === 'document'
+                    ? 'Converted to text on your machine, then requirements are extracted from what the document states.'
+                    : 'Transcript: .vtt, .txt or .md · Recording: .m4a, .mp4, .mp3 or .wav · Document (up to 5 MB): PDF, Word, PowerPoint, Excel, OpenDocument, RTF'}
               </span>
-              <input type="file" accept={`.vtt,.txt,.md,text/vtt,text/plain,${AUDIO_EXTENSIONS.map(e => `.${e}`).join(',')},audio/*,video/mp4`} className="sr-only" onChange={e => pickFile(e.target.files?.[0])} />
+              <input type="file" accept={[
+                '.vtt,.txt,.md,text/vtt,text/plain',
+                ...AUDIO_EXTENSIONS.map(e => `.${e}`), 'audio/*,video/mp4',
+                ...DOCUMENT_EXTENSIONS.map(e => `.${e}`),
+              ].join(',')} className="sr-only" onChange={e => pickFile(e.target.files?.[0])} />
             </label>
           )}
 
           <div>
-            <label htmlFor="import-title-input" className="block text-[11px] font-semibold text-zinc-600 dark:text-zinc-400 mb-1">List name <span className="font-normal text-zinc-400">(optional — defaults to the meeting topic)</span></label>
+            <label htmlFor="import-title-input" className="block text-[11px] font-semibold text-zinc-600 dark:text-zinc-400 mb-1">List name <span className="font-normal text-zinc-400">(optional — defaults to the meeting topic or file name)</span></label>
             <input id="import-title-input" value={title} onChange={e => setTitle(e.target.value)} placeholder="Checkout redesign sync" className={inputCls} />
           </div>
 

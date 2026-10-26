@@ -207,7 +207,7 @@ export const RequirementsSection: React.FC<Props> = ({ agentConfig, agentLabel, 
           </form>
         )}
         <button onClick={() => setImportOpen(true)} className="w-full mb-3 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-black dark:bg-white text-white dark:text-black hover:opacity-90">
-          <Video size={13} /> Import from meeting
+          <Video size={13} /> Import requirements
         </button>
         <ul className="space-y-1">
           {sets.map(s => (
@@ -301,9 +301,9 @@ export const RequirementsSection: React.FC<Props> = ({ agentConfig, agentLabel, 
         {!setId ? (
           <div className="max-w-md mx-auto text-center py-16">
             <div className="w-12 h-12 mx-auto rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center"><Video size={22} /></div>
-            <p className="mt-4 text-sm font-semibold text-zinc-900 dark:text-white">Start from a meeting</p>
-            <p className="text-xs text-zinc-500 mt-1">Import a Zoom meeting or a transcript; the requirements discussed become an editable list you can turn into features.</p>
-            <button onClick={() => setImportOpen(true)} className={`${primary} mx-auto mt-4`}><Video size={14} /> Import from meeting</button>
+            <p className="mt-4 text-sm font-semibold text-zinc-900 dark:text-white">Start from a meeting or a document</p>
+            <p className="text-xs text-zinc-500 mt-1">Import a Zoom meeting, a transcript or recording, or a requirements document (PDF, Word…); the requirements in it become an editable list you can turn into features.</p>
+            <button onClick={() => setImportOpen(true)} className={`${primary} mx-auto mt-4`}><Video size={14} /> Import requirements</button>
           </div>
         ) : loading && !doc ? (
           <p className="text-xs text-zinc-500">Loading…</p>

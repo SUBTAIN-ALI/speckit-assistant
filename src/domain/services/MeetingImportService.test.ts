@@ -8,6 +8,7 @@ import { MeetingFetchResult, MeetingSourceError, MeetingSourcePort } from '../po
 import { parseRequirements } from './requirementsMarkdown';
 import { ImportProgress } from '../models/meeting';
 import { AudioInput, TranscriberPort, TranscriptionError, TranscriptionResult } from '../ports/out/TranscriberPort';
+import { DocumentInput, DocumentReadError, DocumentReaderPort, DocumentText } from '../ports/out/DocumentReaderPort';
 
 const extraction = (...titles: string[]) => ({
   title: 'Checkout',
@@ -250,6 +251,62 @@ describe('MeetingImportService', () => {
 
       const silent = await runAudio(new FakeTranscriber({ ...RESULT, segments: [] }));
       expect(silent).toMatchObject({ status: 'transcription_error', message: 'No speech was found in the recording.' });
+    });
+  });
+
+  describe('documents', () => {
+    class FakeReader implements DocumentReaderPort {
+      calls: string[] = [];
+      constructor(private result: DocumentText | Error) {}
+      async read(doc: DocumentInput) {
+        this.calls.push(doc.filename);
+        if (this.result instanceof Error) throw this.result;
+        return this.result;
+      }
+    }
+    const PRD = '# Checkout PRD\n\n- Users must reset their password by email.';
+    const runDoc = (reader: FakeReader) => {
+      const progress: ImportProgress[] = [];
+      const integrations = new IntegrationsService(creds, () => llm, {});
+      const svc = new MeetingImportService(ws, new RequirementsService(ws, undefined, () => 1_000), integrations, () => source, history, () => 1_000, undefined, undefined, reader);
+      return svc.import({ workspacePath: '/ws', input: { type: 'document', data: Buffer.from('%PDF'), filename: 'Checkout PRD.pdf' } }, p => progress.push(p))
+        .then(o => ({ ...o, progress }));
+    };
+
+    it('converts the document, then extracts from it as a document, not a transcript', async () => {
+      const reader = new FakeReader({ text: PRD, format: 'pdf' });
+      const out = await runDoc(reader);
+      expect(out.status).toBe('ok');
+      expect(reader.calls).toEqual(['Checkout PRD.pdf']);
+      expect(out.setId).toBe('1970-01-01-checkout-prd');
+      const d = dir(out.setId!);
+      expect(ws.files.get(`${d}/document.md`)).toBe(`${PRD}\n`);
+      expect(ws.files.has(`${d}/transcript.md`)).toBe(false);
+      expect(JSON.parse(ws.files.get(`${d}/meeting.json`)!)).toMatchObject({ source: 'upload', kind: 'document', filename: 'Checkout PRD.pdf' });
+      expect(llm.calls[0].user).toContain(`<document>\n${PRD}\n</document>`);
+      expect(llm.calls[0].user).toContain('a written requirements document (Checkout PRD.pdf)');
+      expect(llm.calls[0].user).not.toContain('<transcript>');
+      expect(out.progress[0]).toEqual({ step: 'reading', message: 'Reading Checkout PRD.pdf…' });
+      expect(history.records[0]).toMatchObject({ label: 'Document Checkout PRD.pdf', command: 'document → requirements', status: 'passed' });
+    });
+
+    it('rejects documents over 5 MB before reading them', async () => {
+      const reader = new FakeReader({ text: PRD, format: 'pdf' });
+      const integrations = new IntegrationsService(creds, () => llm, {});
+      const svc = new MeetingImportService(ws, new RequirementsService(ws, undefined, () => 1_000), integrations, () => source, history, () => 1_000, undefined, undefined, reader);
+      const out = await svc.import({ workspacePath: '/ws', input: { type: 'document', data: Buffer.alloc(5 * 1024 * 1024 + 1), filename: 'deck.pptx' } });
+      expect(out).toMatchObject({ status: 'invalid_input', message: expect.stringMatching(/^deck\.pptx is 5\.0 MB; documents can be up to 5 MB\./) });
+      expect(reader.calls).toHaveLength(0);
+      expect(llm.calls).toHaveLength(0);
+    });
+
+    it('reports unreadable documents without creating a list', async () => {
+      const scanned = await runDoc(new FakeReader(new DocumentReadError('no_text', 'No text found in Checkout PRD.pdf.')));
+      expect(scanned).toMatchObject({ status: 'invalid_input', message: 'No text found in Checkout PRD.pdf.' });
+      const broken = await runDoc(new FakeReader(new DocumentReadError('failed', 'Couldn’t read Checkout PRD.pdf: bad xref')));
+      expect(broken.status).toBe('document_error');
+      expect([...ws.files.keys()].some(k => k.startsWith('.specify/meetings/'))).toBe(false);
+      expect(llm.calls).toHaveLength(0);
     });
   });
 });

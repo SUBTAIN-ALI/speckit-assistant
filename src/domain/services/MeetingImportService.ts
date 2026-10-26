@@ -21,10 +21,11 @@ import { parseMeetingInput } from './zoomLink';
 import { priceFor } from './pricing';
 import { MeetingAgentRunner } from './MeetingAgentRunner';
 import { TranscriberPort, TranscriptionError } from '../ports/out/TranscriberPort';
-import { formatSegments, secondsToClock } from './transcript';
+import { MAX_DOCUMENT_BYTES, documentTooLarge, formatSegments, secondsToClock } from './transcript';
+import { DocumentReadError, DocumentReaderPort } from '../ports/out/DocumentReaderPort';
 
 // Meeting → requirements pipeline:
-//   [recording → speech-to-text →] resolve input → fetch (Zoom MCP or uploaded text) → save snapshot →
+//   [recording → speech-to-text | document → Markdown →] resolve input → fetch (Zoom MCP or uploaded text) → save snapshot →
 //   LLM extraction (structured JSON, validated, one retry) → requirements.md.
 // Every import creates its own requirement set in .specify/meetings/<setId>/,
 // which is added to the workspace .gitignore so transcripts are never committed
@@ -32,11 +33,14 @@ import { formatSegments, secondsToClock } from './transcript';
 
 export type ImportInput =
   | { type: 'link'; value: string }
-  | { type: 'transcript'; text: string; filename?: string }
+  // kind 'document': the text is a converted requirements document, not speech.
+  | { type: 'transcript'; text: string; filename?: string; kind?: 'meeting' | 'document' }
   // A meeting recording (e.g. Zoom's local .m4a); transcribed with OpenAI first.
-  | { type: 'audio'; data: Buffer; filename: string };
+  | { type: 'audio'; data: Buffer; filename: string }
+  // A written requirements document (PDF, Word…); converted to Markdown first.
+  | { type: 'document'; data: Buffer; filename: string };
 
-type TextInput = Exclude<ImportInput, { type: 'audio' }>;
+type TextInput = Exclude<ImportInput, { type: 'audio' | 'document' }>;
 
 export type ImportRequest = {
   workspacePath: string;
@@ -69,7 +73,8 @@ export class MeetingImportService {
     private now: () => number = Date.now,
     // Agent engine: the active agent runs /speckit.meetings.import (default).
     private agent?: MeetingAgentRunner,
-    private transcriber?: TranscriberPort
+    private transcriber?: TranscriberPort,
+    private documentReader?: DocumentReaderPort
   ) {}
 
   async import(req: ImportRequest, onProgress?: (p: ImportProgress) => void): Promise<ImportOutcome> {
@@ -80,6 +85,10 @@ export class MeetingImportService {
       if ('status' in t) return t;
       text = { ...req, input: t.input };
       transcribed = t;
+    } else if (req.input.type === 'document') {
+      const d = await this.readDocument(req.input, onProgress);
+      if ('status' in d) return d;
+      text = { ...req, input: d };
     } else {
       text = { ...req, input: req.input };
     }
@@ -127,6 +136,22 @@ export class MeetingImportService {
     }
   }
 
+  // ---------- documents ----------
+
+  private async readDocument(input: Extract<ImportInput, { type: 'document' }>, onProgress?: (p: ImportProgress) => void):
+    Promise<TextInput | ImportOutcome> {
+    if (!this.documentReader) return fail('not_configured', 'Reading documents isn’t available in this build.');
+    if (input.data.length > MAX_DOCUMENT_BYTES) return fail('invalid_input', documentTooLarge(input.filename, input.data.length));
+    onProgress?.({ step: 'reading', message: `Reading ${input.filename}…` });
+    try {
+      const doc = await this.documentReader.read(input);
+      return { type: 'transcript', text: doc.text, filename: input.filename, kind: 'document' };
+    } catch (err) {
+      if (err instanceof DocumentReadError) return fail(err.code === 'failed' ? 'document_error' : 'invalid_input', err.message);
+      return fail('document_error', err instanceof Error ? err.message : String(err));
+    }
+  }
+
   // ---------- agent engine ----------
 
   private async importWithAgent(agent: MeetingAgentRunner, req: TextRequest, onProgress?: (p: ImportProgress) => void): Promise<ImportOutcome> {
@@ -137,8 +162,8 @@ export class MeetingImportService {
       if (parsed.kind === 'invalid') return fail('invalid_input', parsed.message);
       if (parsed.kind === 'unsupported') return fail('unsupported_link', parsed.message);
       meetingId = parsed.meetingId;
-    } else if (!normalizeTranscript(input.text)) {
-      return fail('invalid_input', 'The uploaded transcript is empty.');
+    } else if (!sourceText(input)) {
+      return fail('invalid_input', `The uploaded ${input.kind === 'document' ? 'document' : 'transcript'} is empty.`);
     }
 
     const ready = await agent.readiness(workspacePath, input.type === 'link');
@@ -153,7 +178,7 @@ export class MeetingImportService {
     const record = await this.executionHistory.start(workspacePath, {
       kind: 'meeting',
       feature: null,
-      label: input.type === 'link' ? `Zoom meeting ${meetingId}` : `Transcript ${input.filename ?? 'upload'}`,
+      label: inputLabel(input, meetingId),
       command: `${ready.agentLabel}: /speckit.meetings.import`,
     });
     const log = (text: string) => this.executionHistory.appendLog(workspacePath, record.id, text);
@@ -174,18 +199,26 @@ export class MeetingImportService {
 
     try {
       await this.ensureGitignore(workspacePath);
+      const isDocument = input.type === 'transcript' && input.kind === 'document';
+      const sourceFile = isDocument ? 'document.md' : 'transcript.md';
       await this.workspaceRepo.writeFile(workspacePath, `${dir}/meeting.json`, JSON.stringify({
-        source: input.type === 'link' ? 'zoom' : 'upload', meetingId, importedAt: new Date(this.now()).toISOString(),
+        source: input.type === 'link' ? 'zoom' : 'upload', meetingId,
+        ...(isDocument ? { kind: 'document', filename: input.filename } : {}),
+        importedAt: new Date(this.now()).toISOString(),
       }, null, 2));
       if (input.type === 'transcript') {
-        await this.workspaceRepo.writeFile(workspacePath, `${dir}/transcript.md`, normalizeTranscript(input.text) + '\n');
+        await this.workspaceRepo.writeFile(workspacePath, `${dir}/${sourceFile}`, sourceText(input) + '\n');
       }
 
       let extraction: Extraction | undefined;
-      let context: string | undefined;
+      // Installed copies of the command may predate document support, so say it here too.
+      const documentNote = isDocument
+        ? `There is no meeting: ${dir}/document.md is a written requirements document (converted from ${input.filename}). Read it instead of transcript.md, extract the requirements it states, and leave sourceTimestamp and sourceSpeaker empty.`
+        : undefined;
+      let context: string | undefined = documentNote;
       for (let attempt = 0; attempt < 2 && !extraction; attempt++) {
         progress(input.type === 'link' ? 'fetching' : 'extracting',
-          attempt === 0 ? `${ready.agentLabel} is reading the meeting (/speckit.meetings.import)…` : `${ready.agentLabel} is fixing its output…`);
+          attempt === 0 ? `${ready.agentLabel} is reading the ${isDocument ? 'document' : 'meeting'} (/speckit.meetings.import)…` : `${ready.agentLabel} is fixing its output…`);
         const run = await agent.run(workspacePath, 'import', {
           key: setId,
           listDir: dir,
@@ -205,19 +238,19 @@ export class MeetingImportService {
         const raw = await this.workspaceRepo.readFile(workspacePath, `${dir}/extraction.json`);
         if (!raw.trim()) {
           if (run.exitCode !== 0) return finish(fail('llm_error', `${ready.agentLabel} exited with code ${run.exitCode} without writing extraction.json. See the log in Executions.`));
-          context = `Your previous run did not write ${dir}/extraction.json. Write it now, in exactly the required JSON shape.`;
+          context = withNote(documentNote, `Your previous run did not write ${dir}/extraction.json. Write it now, in exactly the required JSON shape.`);
           continue;
         }
         let parsed: unknown;
         try {
           parsed = JSON.parse(raw.replace(/^\s*```(?:json)?\s*\n([\s\S]*?)\n```\s*$/, '$1'));
         } catch {
-          context = `Your previous ${dir}/extraction.json was not valid JSON. Rewrite it as JSON only, in exactly the required shape.`;
+          context = withNote(documentNote, `Your previous ${dir}/extraction.json was not valid JSON. Rewrite it as JSON only, in exactly the required shape.`);
           continue;
         }
         const v = validateExtraction(parsed);
         if (v.ok) extraction = v.value;
-        else context = `Your previous ${dir}/extraction.json was rejected: ${v.error}. Rewrite it in exactly the required shape.`;
+        else context = withNote(documentNote, `Your previous ${dir}/extraction.json was rejected: ${v.error}. Rewrite it in exactly the required shape.`);
       }
       if (!extraction) {
         return finish(fail('invalid_output', `${ready.agentLabel}’s extraction.json didn’t match the requirements format, even after a retry. It’s kept in ${dir}/ for inspection.`));
@@ -230,8 +263,9 @@ export class MeetingImportService {
         meetingId,
         topic: str(status?.topic),
         startTime: str(status?.startTime),
-        transcript: (await this.workspaceRepo.readFile(workspacePath, `${dir}/transcript.md`)).trim(),
+        transcript: (await this.workspaceRepo.readFile(workspacePath, `${dir}/${sourceFile}`)).trim(),
         summary: str(await this.workspaceRepo.readFile(workspacePath, `${dir}/summary.md`)),
+        ...(isDocument ? { kind: 'document' as const, filename: input.filename } : {}),
       };
       progress('saving', `Saving ${extraction.requirements.length} requirement(s)…`);
       const doc = buildRequirementsDoc(extraction, snapshot);
@@ -241,7 +275,7 @@ export class MeetingImportService {
       return finish({
         status: 'ok',
         message: n === 0
-          ? 'The meeting didn’t contain any requirements the agent could identify.'
+          ? `The ${isDocument ? 'document' : 'meeting'} didn’t contain any requirements the agent could identify.`
           : `Added ${n} requirement${n === 1 ? '' : 's'} as drafts. Review and accept them, then create features from them.`,
         doc,
         added: n,
@@ -279,15 +313,16 @@ export class MeetingImportService {
       if (parsed.kind === 'invalid') return fail('invalid_input', parsed.message);
       if (parsed.kind === 'unsupported') return fail('unsupported_link', parsed.message);
       meetingId = parsed.meetingId;
-    } else if (!normalizeTranscript(input.text)) {
-      return fail('invalid_input', 'The uploaded transcript is empty.');
+    } else if (!sourceText(input)) {
+      return fail('invalid_input', `The uploaded ${input.kind === 'document' ? 'document' : 'transcript'} is empty.`);
     }
+    const isDocument = input.type === 'transcript' && input.kind === 'document';
 
     const record = await this.executionHistory.start(workspacePath, {
       kind: 'meeting',
       feature: null,
-      label: input.type === 'link' ? `Zoom meeting ${meetingId}` : `Transcript ${input.filename ?? 'upload'}`,
-      command: input.type === 'link' ? 'zoom-mcp → requirements' : 'transcript → requirements',
+      label: inputLabel(input, meetingId),
+      command: input.type === 'link' ? 'zoom-mcp → requirements' : isDocument ? 'document → requirements' : 'transcript → requirements',
     });
     const started = this.now();
     const progress = (step: ImportProgress['step'], message: string) => {
@@ -323,6 +358,8 @@ export class MeetingImportService {
           }
           throw err;
         }
+      } else if (isDocument) {
+        snapshot = { source: 'upload', transcript: sourceText(input), kind: 'document', filename: input.filename };
       } else {
         progress('fetching', `Reading ${input.filename ?? 'uploaded transcript'}…`);
         snapshot = { source: 'upload', transcript: normalizeTranscript(input.text) };
@@ -332,14 +369,17 @@ export class MeetingImportService {
       const title = req.title?.trim() || snapshot.topic || input.type === 'transcript' && input.filename?.replace(/\.[^.]+$/, '') || 'Meeting';
       const setId = await this.requirements.newSetId(workspacePath, title, snapshot.startTime);
       const dir = setDir(setId);
-      progress('saving', 'Saving the transcript…');
+      progress('saving', `Saving the ${isDocument ? 'document' : 'transcript'}…`);
       await this.ensureGitignore(workspacePath);
       if (raw !== undefined) await this.workspaceRepo.writeFile(workspacePath, `${dir}/zoom-raw.json`, JSON.stringify(raw, null, 2));
       await this.workspaceRepo.writeFile(workspacePath, `${dir}/meeting.json`, JSON.stringify({
         source: snapshot.source, meetingId: snapshot.meetingId, topic: snapshot.topic,
-        startTime: snapshot.startTime, importedAt: new Date(this.now()).toISOString(),
+        startTime: snapshot.startTime, kind: snapshot.kind, filename: snapshot.filename,
+        importedAt: new Date(this.now()).toISOString(),
       }, null, 2));
-      if (snapshot.transcript) await this.workspaceRepo.writeFile(workspacePath, `${dir}/transcript.md`, snapshot.transcript + '\n');
+      if (snapshot.transcript) {
+        await this.workspaceRepo.writeFile(workspacePath, `${dir}/${isDocument ? 'document.md' : 'transcript.md'}`, snapshot.transcript + '\n');
+      }
       if (snapshot.summary) await this.workspaceRepo.writeFile(workspacePath, `${dir}/summary.md`, snapshot.summary + '\n');
       if (!snapshot.transcript && snapshot.summary) {
         progress('fetching', 'No transcript available — extracting from the AI summary only.');
@@ -386,7 +426,7 @@ export class MeetingImportService {
       return finish({
         status: 'ok',
         message: n === 0
-          ? 'The meeting didn’t contain any requirements the model could identify.'
+          ? `The ${isDocument ? 'document' : 'meeting'} didn’t contain any requirements the model could identify.`
           : `Added ${n} requirement${n === 1 ? '' : 's'} as drafts. Review and accept them, then create features from them.`,
         setId,
         doc,
@@ -463,6 +503,21 @@ export class MeetingImportService {
     if (current.split('\n').some(l => l.trim() === GITIGNORE_ENTRY)) return;
     const sep = current && !current.endsWith('\n') ? '\n' : '';
     await this.workspaceRepo.writeFile(workspacePath, '.gitignore',
-      `${current}${sep}${current ? '\n' : ''}# Meeting transcripts and requirements (speckit-assistant) — kept local\n${GITIGNORE_ENTRY}\n`);
+      `${current}${sep}${current ? '\n' : ''}# Meeting transcripts and requirements (Spec Rabbit) — kept local\n${GITIGNORE_ENTRY}\n`);
   }
+}
+
+// Uploaded text as stored and extracted: transcripts are normalized (VTT →
+// "[hh:mm:ss] Speaker: text"), converted documents are already Markdown.
+function sourceText(input: Extract<TextInput, { type: 'transcript' }>): string {
+  return input.kind === 'document' ? input.text.trim() : normalizeTranscript(input.text);
+}
+
+function inputLabel(input: TextInput, meetingId?: string): string {
+  if (input.type === 'link') return `Zoom meeting ${meetingId}`;
+  return `${input.kind === 'document' ? 'Document' : 'Transcript'} ${input.filename ?? 'upload'}`;
+}
+
+function withNote(note: string | undefined, message: string): string {
+  return note ? `${note}\n\n${message}` : message;
 }

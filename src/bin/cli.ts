@@ -8,7 +8,7 @@ import { activeAgent, toAgentConfig } from '../domain/models/agents';
 import { FeatureGroup, slugify } from '../domain/services/featureGrouping';
 import { WorkflowPhase, AgentConfig, AgentType } from '../domain/models/types';
 import { ImportInput } from '../domain/services/MeetingImportService';
-import { isAudioFilename } from '../domain/services/transcript';
+import { isAudioFilename, isDocumentFilename } from '../domain/services/transcript';
 import { readWorkspaceConfig, saveCurrentWorkspace } from '../adapters/secondary/fs/workspaceConfig';
 
 const args = process.argv.slice(2);
@@ -63,7 +63,7 @@ const firstArg = args[0];
 // Help menu
 function showHelp() {
   console.log(`
-🌱 Spec Kit Assistant CLI
+🌱 Spec Rabbit CLI
 
 Usage:
   speckit-assistant                   Start the Web UI server
@@ -72,7 +72,7 @@ Usage:
   speckit-assistant discard <phase> [feature]   Reset/discard a phase
   speckit-assistant create <feature>  Create a new feature folder
   speckit-assistant delete <feature>  Delete a feature folder
-  speckit-assistant import <file|zoom-link> [--title <name>]   Import a meeting (transcript, recording or Zoom link) into a new requirement list
+  speckit-assistant import <file|zoom-link> [--title <name>]   Import a meeting (transcript, recording or Zoom link) or a requirements document (PDF, Word…) into a new requirement list
   speckit-assistant requirements [list]                        List requirement lists, or one list's requirements
   speckit-assistant create-features <list> [--single] [--all]  Create Spec Kit features from accepted requirements
   speckit-assistant run <phase> [feature] [--agent <type>] [--prompt <text>]  Run an agent phase
@@ -104,7 +104,7 @@ function startWebServer() {
   const portFlagIndex = args.findIndex(arg => arg === '-p' || arg === '--port');
   const port = portFlagIndex !== -1 && args[portFlagIndex + 1] ? args[portFlagIndex + 1] : '18080';
 
-  console.log(`\n🌱 Spec Kit Assistant Web Server`);
+  console.log(`\n🌱 Spec Rabbit Web Server`);
   console.log(`📂 Workspace: ${workspacePath}`);
   console.log(`🔌 Starting server on port ${port}...\n`);
 
@@ -139,7 +139,7 @@ function startWebServer() {
 
   setTimeout(() => {
     const url = `http://localhost:${port}`;
-    console.log(`\n🚀 Speckit Assistant available at: ${url}`);
+    console.log(`\n🚀 Spec Rabbit available at: ${url}`);
     open(url).catch(() => {});
   }, 2500);
 
@@ -277,14 +277,16 @@ function flagValue(cmdArgs: string[], flag: string): string | undefined {
 
 async function importMeeting(cmdArgs: string[]) {
   const source = cmdArgs[0];
-  if (!source) throw new Error('Usage: import <transcript-file | recording | zoom-link | meeting-id> [--title <name>]');
+  if (!source) throw new Error('Usage: import <transcript-file | recording | document | zoom-link | meeting-id> [--title <name>]');
   const title = flagValue(cmdArgs, '--title');
   const filename = path.basename(source);
   const input: ImportInput = !(fs.existsSync(source) && fs.statSync(source).isFile())
     ? { type: 'link', value: source }
     : isAudioFilename(filename)
       ? { type: 'audio', data: fs.readFileSync(source), filename }
-      : { type: 'transcript', text: fs.readFileSync(source, 'utf-8'), filename };
+      : isDocumentFilename(filename)
+        ? { type: 'document', data: fs.readFileSync(source), filename }
+        : { type: 'transcript', text: fs.readFileSync(source, 'utf-8'), filename };
   console.log(`Importing ${input.type === 'link' ? source : filename}...`);
   const out = await meetingImportService.import({ workspacePath, input, title }, p => console.log(`  · ${p.message}`));
   if (out.status !== 'ok') throw new Error(out.message);

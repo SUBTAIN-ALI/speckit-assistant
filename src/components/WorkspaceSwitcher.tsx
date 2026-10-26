@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Check, ChevronDown, FolderOpen, Loader2, X } from 'lucide-react';
+import { Check, ChevronDown, FolderOpen, FolderSearch, Loader2, X } from 'lucide-react';
+import { FolderBrowser } from './FolderBrowser';
 
 type WorkspaceInfo = { path: string; name: string; exists: boolean; specKit: boolean };
 
@@ -16,7 +17,7 @@ export const WorkspaceSwitcher: React.FC<Props> = ({ busy }) => {
   const [open, setOpen] = useState(false);
   const [current, setCurrent] = useState<WorkspaceInfo | null>(null);
   const [recent, setRecent] = useState<WorkspaceInfo[]>([]);
-  const [input, setInput] = useState('');
+  const [browsing, setBrowsing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [switching, setSwitching] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
@@ -152,27 +153,26 @@ export const WorkspaceSwitcher: React.FC<Props> = ({ busy }) => {
             })}
           </ul>
 
-          <form
-            className="mt-2 pt-2 border-t border-zinc-200 dark:border-zinc-800 flex gap-1.5"
-            onSubmit={e => { e.preventDefault(); if (input.trim()) switchTo(input); }}
-          >
-            <input
-              value={input}
-              onChange={e => { setInput(e.target.value); setError(null); }}
-              placeholder="Open a folder: ~/Projects/my-app"
-              aria-label="Project folder path"
-              className="flex-1 min-w-0 px-2 py-1.5 rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-[11px] font-mono focus:outline-none focus:ring-2 focus:ring-blue-500/40"
-            />
+          <div className="mt-2 pt-2 border-t border-zinc-200 dark:border-zinc-800">
             <button
-              type="submit"
-              disabled={!input.trim() || busy || switching !== null}
-              className="px-2.5 py-1.5 rounded-md text-[11px] font-semibold bg-black dark:bg-white text-white dark:text-black disabled:opacity-40"
+              onClick={() => { setOpen(false); setBrowsing(true); setError(null); }}
+              disabled={busy || switching !== null}
+              className="w-full flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-semibold bg-black dark:bg-white text-white dark:text-black disabled:opacity-40"
             >
-              Open
+              <FolderSearch size={12} /> Browse folders…
             </button>
-          </form>
+          </div>
           {error && <p role="alert" className="px-1 pt-1.5 text-[10px] text-red-600 dark:text-red-400">{error}</p>}
         </div>
+      )}
+
+      {browsing && (
+        <FolderBrowser
+          // Start next to the open project, where its sibling projects usually are.
+          startPath={current ? current.path.replace(/\/[^/]+\/?$/, '') || '/' : undefined}
+          onClose={() => setBrowsing(false)}
+          onSelect={p => { setBrowsing(false); switchTo(p); }}
+        />
       )}
     </div>
   );

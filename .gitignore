@@ -42,7 +42,7 @@ Thumbs.db
 .env.test.local
 .env.production.local
 
-# SpecKit Assistant Runtime & Local States
+# Spec Rabbit Runtime & Local States
 .specify/.runtime/
 .workspace-config.json
 .speckit-assistant-config.json

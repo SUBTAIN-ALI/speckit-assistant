@@ -12,7 +12,7 @@ extension:
 requires:
   speckit_version: ">=0.1.0"
 
-# Commands are invoked on demand from the speckit-assistant Requirements section
+# Commands are invoked on demand from the Spec Rabbit Requirements section
 # (and its CLI) — they are NOT wired as lifecycle hooks (no `hooks:` block). The
 # command namespace must equal the extension id (speckit.<id>.<command>).
 # Both commands write JSON files that the app validates before using them.

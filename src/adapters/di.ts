@@ -11,6 +11,7 @@ import { WorkflowService } from '../domain/services/WorkflowService';
 import { FSCredentialStore } from './secondary/fs/FSCredentialStore';
 import { createLlmClient } from './secondary/llm';
 import { OpenAiTranscriber } from './secondary/llm/OpenAiTranscriber';
+import { OfficeDocumentReader } from './secondary/docs/OfficeDocumentReader';
 import { ZoomAuth } from './secondary/zoom/ZoomAuth';
 import { ZoomMcpMeetingSource } from './secondary/zoom/ZoomMcpMeetingSource';
 import { IntegrationsService } from '../domain/services/IntegrationsService';
@@ -25,7 +26,11 @@ const credentialStore = new FSCredentialStore();
 export const zoomAuth = new ZoomAuth(credentialStore);
 // Every agent run gets a fresh Zoom access token (when Zoom is connected), so an
 // MCP server header like "Bearer ${ZOOM_MEETINGS_MCP_ACCESS_TOKEN}" just works.
-const agentRunner = new ProcessAgentRunner(async (): Promise<Record<string, string>> => {
+// One runner per server process. It holds the live agent sessions (to stop
+// them, type into them, close them when a card moves on); in `next dev` route
+// modules get reloaded, and a fresh runner would lose track of those sessions.
+const globalForAgents = globalThis as unknown as { speckitAgentRunner?: ProcessAgentRunner };
+const agentRunner = globalForAgents.speckitAgentRunner ??= new ProcessAgentRunner(async (): Promise<Record<string, string>> => {
   try {
     return { [ZOOM_TOKEN_ENV]: await zoomAuth.getAccessToken() };
   } catch {
@@ -59,7 +64,8 @@ export const meetingImportService = new MeetingImportService(
   executionHistory,
   Date.now,
   meetingAgentRunner,
-  new OpenAiTranscriber()
+  new OpenAiTranscriber(),
+  new OfficeDocumentReader()
 );
 export const featureCreationService = new FeatureCreationService(
   workspaceRepo, requirementsService, integrationsService, workflowService, meetingAgentRunner, executionHistory

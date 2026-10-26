@@ -890,7 +890,7 @@ export default function Dashboard() {
           <span className="text-xl">🌱</span>
           <div>
             <div className="flex items-center gap-1.5">
-              <h1 className="text-sm font-bold tracking-tight">Spec Kit Assistant</h1>
+              <h1 className="text-sm font-bold tracking-tight">Spec Rabbit</h1>
               <button
                 onClick={() => setShowAbout(true)}
                 className="text-[9px] font-mono text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 border border-zinc-200 dark:border-zinc-800 rounded px-1 py-0.5 leading-none transition"
@@ -1034,8 +1034,9 @@ export default function Dashboard() {
           />
         )}
 
-        {section === 'workflow' && (
-        <>
+        {/* Kept mounted while another section is open, so a running agent's
+            live console (and its scrollback) keeps receiving output. */}
+        <div className={section === 'workflow' ? 'contents' : 'hidden'}>
         {/* Left Sidebar: Feature Manager */}
         <aside className={`border-r border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950/20 flex flex-col shrink-0 transition-all duration-300 ${isSidebarCollapsed ? 'w-12 items-center justify-between py-4' : 'w-64'}`}>
           {isSidebarCollapsed ? (
@@ -1277,7 +1278,7 @@ export default function Dashboard() {
                 <div className={activeTab === 'console' ? 'h-full' : 'hidden'}>
                   <AgentConsole
                     ref={agentConsoleRef}
-                    active={activeTab === 'console'}
+                    active={section === 'workflow' && activeTab === 'console'}
                     running={running}
                     onInput={handleAgentInput}
                     onResize={handleAgentResize}
@@ -1290,8 +1291,7 @@ export default function Dashboard() {
             </div>
           </div>
         </main>
-        </>
-        )}
+        </div>
       </div>
       <AboutModal isOpen={showAbout} onClose={() => setShowAbout(false)} />
       {editingPersona && (

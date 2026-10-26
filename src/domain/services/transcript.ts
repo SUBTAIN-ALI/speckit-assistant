@@ -102,5 +102,27 @@ export function secondsToClock(total: number): string {
 export const AUDIO_EXTENSIONS = ['m4a', 'mp3', 'mp4', 'mpeg', 'mpga', 'wav', 'webm', 'ogg', 'flac'];
 
 export function isAudioFilename(name: string): boolean {
-  return AUDIO_EXTENSIONS.includes((name.split('.').pop() ?? '').toLowerCase());
+  return AUDIO_EXTENSIONS.includes(extensionOf(name));
+}
+
+// Written requirement documents, converted to text before extraction. Plain
+// text (.txt, .md, .vtt, .csv) needs no conversion and takes the transcript path.
+// The legacy binary Office formats are listed so they get a "save as" hint
+// instead of being read as garbled text.
+export const DOCUMENT_EXTENSIONS = ['pdf', 'docx', 'pptx', 'xlsx', 'odt', 'odp', 'ods', 'rtf', 'html', 'htm', 'epub', 'doc', 'ppt', 'xls'];
+
+// Requirement documents are text-heavy; anything bigger is usually a deck or
+// scan full of images, which costs parse time without adding requirements.
+export const MAX_DOCUMENT_BYTES = 5 * 1024 * 1024;
+
+export function documentTooLarge(filename: string, bytes: number): string {
+  return `${filename} is ${(bytes / 1024 / 1024).toFixed(1)} MB; documents can be up to ${MAX_DOCUMENT_BYTES / 1024 / 1024} MB. Remove large images or split it, then upload it again.`;
+}
+
+export function isDocumentFilename(name: string): boolean {
+  return DOCUMENT_EXTENSIONS.includes(extensionOf(name));
+}
+
+export function extensionOf(name: string): string {
+  return name.includes('.') ? (name.split('.').pop() ?? '').toLowerCase() : '';
 }

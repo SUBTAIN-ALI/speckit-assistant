@@ -14,17 +14,27 @@ const LIST = {
 
 describe('WorkspaceSwitcher', () => {
   let calls: Array<{ method: string; body?: any }>;
+  let browsed: string[];
   const reload = vi.fn();
 
   beforeEach(() => {
     calls = [];
+    browsed = [];
     reload.mockReset();
     Object.defineProperty(window, 'location', { value: { reload }, writable: true });
-    global.fetch = vi.fn(async (_url: string, init?: RequestInit) => {
+    global.fetch = vi.fn(async (url: string, init?: RequestInit) => {
       const method = init?.method ?? 'GET';
+      if (url.startsWith('/api/workspace/browse')) {
+        const dir = new URL(url, 'http://x').searchParams.get('path')!;
+        browsed.push(dir);
+        if (dir === '/private') return new Response(JSON.stringify({ error: 'macOS doesn’t allow reading /private.' }), { status: 403 });
+        return new Response(JSON.stringify({
+          path: dir, parent: '/', specKit: dir === '/p/quickbite', places: [{ name: 'Home', path: '/p' }],
+          folders: dir === '/p' ? [{ name: 'admin-portal', path: '/p/admin-portal', specKit: false }, { name: 'quickbite', path: '/p/quickbite', specKit: true }] : [],
+        }));
+      }
       const body = init?.body ? JSON.parse(String(init.body)) : undefined;
       calls.push({ method, body });
-      if (method === 'POST' && body.path === 'relative') return new Response(JSON.stringify({ error: 'Use a full path' }), { status: 400 });
       if (method === 'POST') return new Response(JSON.stringify({ current: { ...LIST.recent[0] } }));
       return new Response(JSON.stringify(LIST));
     }) as unknown as typeof fetch;
@@ -42,13 +52,28 @@ describe('WorkspaceSwitcher', () => {
     expect(calls).toContainEqual({ method: 'POST', body: { path: '/p/admin-portal' } });
   });
 
-  it('opens a typed folder and shows the server’s error', async () => {
+  it('browses into folders and opens the chosen one', async () => {
     render(<WorkspaceSwitcher busy={false} />);
     fireEvent.click(await screen.findByText('quickbite'));
-    fireEvent.change(screen.getByLabelText('Project folder path'), { target: { value: 'relative' } });
-    fireEvent.click(screen.getByText('Open'));
-    expect((await screen.findByRole('alert')).textContent).toContain('full path');
-    expect(reload).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText(/Browse folders/));
+    // Starts in the folder that holds the open project.
+    expect(await screen.findByRole('option', { name: /admin-portal/ })).toBeTruthy();
+    expect(browsed).toEqual(['/p']);
+
+    fireEvent.click(screen.getByRole('option', { name: /admin-portal/ })); // go in
+    await waitFor(() => expect(browsed).toEqual(['/p', '/p/admin-portal']));
+    fireEvent.click(await screen.findByText('Open this folder'));
+    await waitFor(() => expect(reload).toHaveBeenCalled());
+    expect(calls).toContainEqual({ method: 'POST', body: { path: '/p/admin-portal' } });
+  });
+
+  it('shows why a folder can’t be opened', async () => {
+    render(<WorkspaceSwitcher busy={false} />);
+    fireEvent.click(await screen.findByText('quickbite'));
+    fireEvent.click(screen.getByText(/Browse folders/));
+    fireEvent.change(await screen.findByLabelText('Go to folder path'), { target: { value: '/private' } });
+    fireEvent.submit(screen.getByLabelText('Go to folder path').closest('form')!);
+    expect((await screen.findByRole('alert')).textContent).toContain('doesn’t allow');
   });
 
   it('blocks switching while an agent is running', async () => {

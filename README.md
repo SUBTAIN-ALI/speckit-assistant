@@ -1,4 +1,4 @@
-# 🌱 SpecKit Assistant
+# 🌱 Spec Rabbit
 
 > **Visual Orchestrator for Spec-Driven Development (SDD)** — Decoupled Hexagonal Architecture, Next.js 15, ReactFlow, and Multi-Agent Orchestration.
 
@@ -15,7 +15,7 @@
 
 ### 🌐 Project Overview
 
-**SpecKit Assistant** is a visual orchestrator for **Spec-Driven Development (SDD)**. It connects your local specification, planning, and task checklists with AI agents (Claude, Gemini, Copilot) through a modern, Vercel-style dashboard. By utilizing **Hexagonal Architecture**, it fully decouples the core domain rules from UI and external runners, ensuring that your local file system remains the single source of truth at all times.
+**Spec Rabbit** is a visual orchestrator for **Spec-Driven Development (SDD)**. It connects your local specification, planning, and task checklists with AI agents (Claude, Gemini, Copilot) through a modern, Vercel-style dashboard. By utilizing **Hexagonal Architecture**, it fully decouples the core domain rules from UI and external runners, ensuring that your local file system remains the single source of truth at all times.
 
 ---
 
@@ -53,7 +53,7 @@ graph TD
 4. **Tasks**: Break down plans into an actionable checklist of developer-ready tasks.
 5. **Implementation**: Execute tasks and generate clean code.
 
-SpecKit Assistant acts as the **Visual Dashboard** and **Command-Line Interface** to run, approve, and track these phases, syncing seamlessly with your local file system.
+Spec Rabbit acts as the **Visual Dashboard** and **Command-Line Interface** to run, approve, and track these phases, syncing seamlessly with your local file system.
 
 ---
 
@@ -91,7 +91,7 @@ SpecKit Assistant acts as the **Visual Dashboard** and **Command-Line Interface*
 
 ## 🏛️ Architecture (Hexagonal / Ports & Adapters)
 
-To prevent coupling our core workflows to UI libraries, Next.js, or file system APIs, SpecKit Assistant is built using **Hexagonal Architecture**.
+To prevent coupling our core workflows to UI libraries, Next.js, or file system APIs, Spec Rabbit is built using **Hexagonal Architecture**.
 
 ```text
 src/
@@ -181,7 +181,7 @@ npm publish --access public
 
 ## 💻 CLI Usage
 
-SpecKit Assistant comes with a powerful CLI. When installed globally, you can invoke it using `speckit-assistant` (or via local path `./bin/bin/cli.js`).
+Spec Rabbit comes with a powerful CLI. When installed globally, you can invoke it using `speckit-assistant` (or via local path `./bin/bin/cli.js`).
 
 ### CLI Commands
 
@@ -288,6 +288,8 @@ speckit-assistant create-features 2026-10-26-weekly-sync         # AI-suggested 
 
 **Recordings (free Zoom plans):** free accounts record to your computer only (`Documents/Zoom/<meeting>/`), so there's nothing for Zoom MCP to read. Upload the recording's `.m4a` (or `.mp4`, `.mp3`, `.wav`) under **File** instead — it's transcribed with speaker labels using your OpenAI key (`gpt-4o-transcribe-diarize`, about $0.006 per minute), then extracted like any transcript. OpenAI accepts up to 25 MB per file; the audio-only `.m4a` is about 0.5 MB per minute. Longer files are split automatically when `ffmpeg` is installed. The `.conf` file in that folder is Zoom's conversion settings, not a recording. From the CLI: `speckit-assistant import audio1234.m4a`.
 
+**Requirements documents:** the same **File** tab takes a written source instead of a meeting — a PRD, brief, spec or user stories as **PDF**, **Word** (`.docx`), **PowerPoint** (`.pptx`), **Excel** (`.xlsx`), **OpenDocument** (`.odt`/`.odp`/`.ods`), **RTF**, **HTML** or **EPUB** (up to 5 MB). It's converted to Markdown on your machine (headings, lists and tables are kept), saved as `document.md` in the new list, and extracted with either engine. Scanned PDFs without a text layer aren't supported yet, and old binary `.doc`/`.ppt`/`.xls` files need to be saved as `.docx`/`.pptx`/`.xlsx` first. Plain `.txt`/`.md` files work as they always have. From the CLI: `speckit-assistant import "Checkout PRD.pdf"`.
+
 **Where things are stored**
 
 | What | Where |
@@ -303,7 +305,7 @@ speckit-assistant create-features 2026-10-26-weekly-sync         # AI-suggested 
 
 ## 📂 Workspace Anatomy
 
-SpecKit Assistant manages markdown files inside your target project workspace. Your workspace directory structure should follow this pattern:
+Spec Rabbit manages markdown files inside your target project workspace. Your workspace directory structure should follow this pattern:
 
 ```text
 my-project/
@@ -335,7 +337,7 @@ my-project/
 
 ## 🧪 Testing & Quality Assurance
 
-SpecKit Assistant maintains a high bar for reliability and code health:
+Spec Rabbit maintains a high bar for reliability and code health:
 
 * **Vitest** for fast, concurrent unit and integration testing.
 * **100% Mocked File Systems** in unit tests to prevent disk pollution.

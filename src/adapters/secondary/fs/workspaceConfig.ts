@@ -81,3 +81,43 @@ function writeConfig(configPath: string, config: WorkspaceConfig): void {
     // best-effort, like the CLI's own save
   }
 }
+
+export type FolderListing = {
+  path: string;
+  parent: string | null; // null at the filesystem root
+  specKit: boolean;
+  folders: Array<{ name: string; path: string; specKit: boolean }>;
+  places: Array<{ name: string; path: string }>; // shortcuts: Home, Projects, Desktop…
+};
+
+const MAX_FOLDERS = 1000;
+
+// The subfolders of `dir` for the project picker (names only; hidden folders skipped).
+export function listFolders(dir: string): FolderListing {
+  const resolved = path.resolve(dir);
+  const entries = fs.readdirSync(resolved, { withFileTypes: true });
+  const folders = entries
+    .filter(e => !e.name.startsWith('.') && (e.isDirectory() || (e.isSymbolicLink() && isDirectory(path.join(resolved, e.name)))))
+    .map(e => e.name)
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true }))
+    .slice(0, MAX_FOLDERS)
+    .map(name => {
+      const p = path.join(resolved, name);
+      return { name, path: p, specKit: isDirectory(path.join(p, '.specify')) };
+    });
+  const parent = path.dirname(resolved);
+  const home = os.homedir();
+  const places = [
+    { name: 'Home', path: home },
+    ...['Projects', 'Developer', 'Code', 'Documents', 'Desktop']
+      .map(name => ({ name, path: path.join(home, name) }))
+      .filter(p => isDirectory(p.path)),
+  ];
+  return {
+    path: resolved,
+    parent: parent === resolved ? null : parent,
+    specKit: isDirectory(path.join(resolved, '.specify')),
+    folders,
+    places,
+  };
+}

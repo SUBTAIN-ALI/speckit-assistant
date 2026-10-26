@@ -1,7 +1,7 @@
 # Spec Kit Review Personas
 
 A Spec Kit extension that adds a **review gate** to the implementation phase. After
-`/speckit.implement` runs, `speckit-assistant` executes these persona sub-agents **in order** —
+`/speckit.implement` runs, Spec Rabbit executes these persona sub-agents **in order** —
 QA → Code Review → Security → **Tech Lead** (final sign-off) — each as its own tracked agent run.
 
 ## Commands
@@ -25,7 +25,7 @@ or
 VERDICT: FAIL
 ```
 
-`speckit-assistant` reads this marker to decide pass/fail (falling back to the process exit code if
+Spec Rabbit reads this marker to decide pass/fail (falling back to the process exit code if
 the marker is absent). The gate **stops at the first FAIL**; the implementation phase only advances to
 `awaiting_review` once every enabled persona — ending with Tech Lead — passes.
 
@@ -38,5 +38,5 @@ the agent CLI you run, e.g. Claude Code):
 specify extension add --dev /path/to/spec-kit-personas
 ```
 
-The persona commands (and whether each is enabled) are configurable in the speckit-assistant
+The persona commands (and whether each is enabled) are configurable in the Spec Rabbit
 **Agent Config → Review Gate** panel.

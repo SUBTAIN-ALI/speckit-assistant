@@ -28,7 +28,7 @@ provides:
       description: "Consolidate lead: merges the spec-reviews contributions into spec.md."
 
 # These commands are intended to be wired as after_specify hooks (priority-ordered)
-# in the project's .specify/extensions.yml — managed by the speckit-assistant UI.
+# in the project's .specify/extensions.yml — managed by the Spec Rabbit UI.
 hooks:
   after_specify:
     - id: spec-po

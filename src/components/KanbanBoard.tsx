@@ -93,6 +93,15 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
     return 'passed';
   };
 
+  // The review gate stopped at a failing reviewer: the phase stays 'running'
+  // (blocked), but nothing is executing. Returns that reviewer's label.
+  const gateBlockedBy = (ps: PhaseState): string | null => {
+    if (ps.phase !== 'implementation' || ps.status !== 'running' || !ps.personas) return null;
+    if (ps.personas.some(p => p.status === 'running')) return null;
+    const failed = ps.personas.find(p => p.status === 'failed');
+    return failed ? PERSONA_LABELS[failed.id] ?? failed.id : null;
+  };
+
   const isDeveloperPassedButGateIdle = (activePhaseState: PhaseState): boolean => {
     return getDeveloperStatus(activePhaseState) === 'passed' &&
       (!activePhaseState.personas || activePhaseState.personas.every(p => p.status === 'idle'));
@@ -306,7 +315,15 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                           {/* Action area based on status */}
                           {colKey !== 'completed' && (
                             <div className="flex justify-between items-center mt-3">
-                              {getStatusBadge(activePhaseState.status, activePhaseState.stale)}
+                              {gateBlockedBy(activePhaseState) ? (
+                                <span
+                                  className="flex items-center gap-1 text-[10px] font-semibold text-red-500 bg-red-500/10 px-1.5 py-0.5 rounded border border-red-500/20"
+                                  title="A reviewer failed the implementation. Read its report, fix the problems, then re-run the review."
+                                >
+                                  <AlertTriangle size={10} />
+                                  BLOCKED · {gateBlockedBy(activePhaseState)}
+                                </span>
+                              ) : getStatusBadge(activePhaseState.status, activePhaseState.stale)}
 
                               {progress && (
                                 <span className="text-[10px] font-mono text-zinc-400 bg-zinc-100 dark:bg-zinc-900 px-1 py-0.5 rounded">
@@ -487,7 +504,19 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                           {colKey !== 'completed' ? (
                             activePhaseState.status !== 'approved' ? (
                               <>
-                                {activePhaseState.status === 'running' ? (
+                                {gateBlockedBy(activePhaseState) && onRerunGate && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onRerunGate(feature.name);
+                                    }}
+                                    title="Run the reviewers again, without re-running the implementation"
+                                    className="flex items-center gap-0.5 p-1 px-2 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900 text-[10px] font-semibold rounded transition"
+                                  >
+                                    <ShieldCheck size={8} /> Re-run review
+                                  </button>
+                                )}
+                                {activePhaseState.status === 'running' && !gateBlockedBy(activePhaseState) ? (
                                   <button
                                     onClick={(e) => {
                                       e.stopPropagation();
@@ -515,7 +544,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                                        e.stopPropagation();
                                        onOpenReview(feature.name, activePhaseState);
                                      }}
-                                     disabled={activePhaseState.status === 'running'}
+                                     disabled={activePhaseState.status === 'running' && !gateBlockedBy(activePhaseState)}
                                      title="Open the human developer audit portal"
                                      className="flex items-center gap-0.5 p-1 px-2 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900 text-[10px] font-semibold rounded transition disabled:opacity-50"
                                    >

@@ -78,6 +78,24 @@ describe('agent engine', () => {
     expect(out.cost).toMatchObject({ totalTokens: 500 });
   });
 
+  it('imports a converted document, telling the agent to read document.md', async () => {
+    agent.script = [(w, args, context) => {
+      const d = dirOf(args);
+      if (!context?.includes(`${d}/document.md`)) return 1;
+      w.files.set(`${d}/extraction.json`, EXTRACTION);
+      w.files.set(`${d}/status.json`, '{"status":"ok","topic":"","startTime":""}');
+    }];
+    const reader = { read: async () => ({ text: '# QuickBite PRD\n\n- Live driver tracking', format: 'docx' }) };
+    const svc = new MeetingImportService(ws, new RequirementsService(ws, undefined, () => 1_000), integrations(), () => { throw new Error('direct Zoom not used'); }, history, () => 1_000, agent as unknown as MeetingAgentRunner, undefined, reader);
+    const out = await svc.import({ workspacePath: '/ws', input: { type: 'document', data: Buffer.from('x'), filename: 'QuickBite PRD.docx' } });
+    expect(out.status).toBe('ok');
+    const d = '.specify/meetings/1970-01-01-quickbite-prd';
+    expect(ws.files.get(`${d}/document.md`)).toBe('# QuickBite PRD\n\n- Live driver tracking\n');
+    expect(agent.runs[0].context).toContain('converted from QuickBite PRD.docx');
+    expect(history.records[0]).toMatchObject({ label: 'Document QuickBite PRD.docx', status: 'passed' });
+    expect(parseRequirements(ws.files.get(`${d}/requirements.md`)!).requirements).toHaveLength(2);
+  });
+
   it('passes the Zoom meeting id and uses the transcript and topic the agent fetched', async () => {
     agent.script = [(w, args) => {
       const d = dirOf(args);

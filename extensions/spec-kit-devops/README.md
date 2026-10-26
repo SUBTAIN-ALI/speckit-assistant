@@ -1,7 +1,7 @@
 # Spec Kit DevOps Agents
 
 A Spec Kit extension that adds **operational (DevOps) agents** you run **on demand**
-from the speckit-assistant **Executions** view — after the implementation gate is
+from the Spec Rabbit **Executions** view — after the implementation gate is
 approved. Unlike the review personas and specification agents, these are not wired as
 lifecycle hooks; you trigger them explicitly.
 
@@ -16,17 +16,17 @@ lifecycle hooks; you trigger them explicitly.
 ## The `STATUS:` contract
 
 Each command ends its report with a single status line (e.g. `STATUS: OK`,
-`STATUS: DEGRADED`, `STATUS: FAILED`, `STATUS: RESOLVED`). speckit-assistant surfaces
+`STATUS: DEGRADED`, `STATUS: FAILED`, `STATUS: RESOLVED`). Spec Rabbit surfaces
 the run result; it falls back to the process exit code if the marker is absent.
 
 ## Installation
 
 Install into a Spec Kit workspace like any other extension (or one click in the
-speckit-assistant **Extensions** panel):
+Spec Rabbit **Extensions** panel):
 
 ```bash
 specify extension add --dev /path/to/spec-kit-devops
 ```
 
-Per-agent model and system-prompt overrides are configured in the speckit-assistant
+Per-agent model and system-prompt overrides are configured in the Spec Rabbit
 **Agents → DevOps** panel and passed to the agent CLI at run time.

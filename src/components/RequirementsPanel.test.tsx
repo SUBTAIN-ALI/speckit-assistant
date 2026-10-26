@@ -114,7 +114,7 @@ describe('RequirementsPanel', () => {
     serverDoc = { meta: { nextId: 1 }, requirements: [] };
     const onImport = vi.fn();
     render(<Harness onImport={onImport} />);
-    fireEvent.click(screen.getByText('Import from meeting'));
+    fireEvent.click(screen.getByText('Import requirements'));
     expect(onImport).toHaveBeenCalled();
   });
 });

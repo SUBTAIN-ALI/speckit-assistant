@@ -2,8 +2,9 @@
 const nextConfig = {
   reactStrictMode: true,
   // node-pty is a native addon and must not be bundled by webpack; load it from
-  // node_modules at runtime on the server instead.
-  serverExternalPackages: ['node-pty'],
+  // node_modules at runtime on the server instead. officeparser runs pdf.js in a
+  // child process from its own files, so it is loaded from node_modules too.
+  serverExternalPackages: ['node-pty', 'officeparser'],
   eslint: {
     ignoreDuringBuilds: true,
   },

@@ -7,6 +7,10 @@ export type MeetingSnapshot = {
   startTime?: string;
   transcript: string; // "[00:12:41] Sarah: …" lines, or raw text for uploads
   summary?: string;   // AI Companion summary / notes, when available
+  // 'document': `transcript` holds a written requirements document (a PDF,
+  // Word file… converted to Markdown), not speech.
+  kind?: 'meeting' | 'document';
+  filename?: string;
 };
 
 export type MeetingInput =
@@ -27,9 +31,10 @@ export type ImportStatus =
   | 'source_error'    // Zoom MCP server failed or offered no usable tool
   | 'llm_error'
   | 'transcription_error' // speech-to-text of an uploaded recording failed
+  | 'document_error'      // an uploaded document couldn't be read
   | 'invalid_output';
 
 export type ImportProgress = {
-  step: 'resolving' | 'transcribing' | 'fetching' | 'extracting' | 'saving';
+  step: 'resolving' | 'transcribing' | 'reading' | 'fetching' | 'extracting' | 'saving';
   message: string;
 };

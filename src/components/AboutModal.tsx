@@ -29,7 +29,7 @@ export const AboutModal: React.FC<AboutModalProps> = ({ isOpen, onClose }) => {
           <div className="flex items-center gap-3">
             <span className="text-2xl">🌱</span>
             <div>
-              <h2 className="text-sm font-bold text-zinc-900 dark:text-white tracking-tight">Spec Kit Assistant</h2>
+              <h2 className="text-sm font-bold text-zinc-900 dark:text-white tracking-tight">Spec Rabbit</h2>
               <p className="text-[11px] text-zinc-500 dark:text-zinc-400 font-mono">v{APP_VERSION}</p>
             </div>
           </div>

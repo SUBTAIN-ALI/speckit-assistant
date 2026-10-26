@@ -146,7 +146,7 @@ export const RequirementsPanel: React.FC<Props> = ({ setId, doc, onDocChange, on
           Import them from a recorded Zoom meeting or an uploaded transcript, or write them by hand.
         </p>
         <div className="mt-5 flex justify-center gap-2">
-          <button onClick={onImport} className="flex items-center gap-1.5 px-3 py-2 bg-black dark:bg-white text-white dark:text-black rounded-lg text-xs font-semibold hover:opacity-90"><Video size={14} /> Import from meeting</button>
+          <button onClick={onImport} className="flex items-center gap-1.5 px-3 py-2 bg-black dark:bg-white text-white dark:text-black rounded-lg text-xs font-semibold hover:opacity-90"><Video size={14} /> Import requirements</button>
           <button onClick={() => setAdding(true)} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900"><Plus size={14} /> Add manually</button>
         </div>
         {error && <p role="alert" className="mt-3 text-[11px] text-red-600">{error}</p>}
