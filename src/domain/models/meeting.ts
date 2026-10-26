@@ -26,9 +26,10 @@ export type ImportStatus =
   | 'no_transcript'
   | 'source_error'    // Zoom MCP server failed or offered no usable tool
   | 'llm_error'
+  | 'transcription_error' // speech-to-text of an uploaded recording failed
   | 'invalid_output';
 
 export type ImportProgress = {
-  step: 'resolving' | 'fetching' | 'extracting' | 'saving';
+  step: 'resolving' | 'transcribing' | 'fetching' | 'extracting' | 'saving';
   message: string;
 };

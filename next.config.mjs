@@ -9,7 +9,13 @@ const nextConfig = {
   },
   typescript: {
     ignoreBuildErrors: true,
-  }
+  },
+  experimental: {
+    // The middleware (Host/Origin checks) runs on every route, and Next.js
+    // truncates request bodies above this size when it does — meeting
+    // recordings uploaded for transcription are often larger than the 10 MB default.
+    middlewareClientMaxBodySize: '500mb',
+  },
 };
 
 export default nextConfig;

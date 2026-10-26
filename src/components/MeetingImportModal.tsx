@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { X, Video, Upload, Loader2, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { ImportProgress, ImportStatus } from '../domain/models/meeting';
 import { RequirementsDoc } from '../domain/models/requirements';
+import { AUDIO_EXTENSIONS, isAudioFilename } from '../domain/services/transcript';
 
 type Props = {
   isOpen: boolean;
@@ -21,7 +22,8 @@ export const MeetingImportModal: React.FC<Props> = ({ isOpen, zoomConnected, llm
   const [tab, setTab] = useState<'zoom' | 'file'>(zoomConnected ? 'zoom' : 'file');
   const [link, setLink] = useState('');
   const [title, setTitle] = useState('');
-  const [file, setFile] = useState<{ name: string; text: string } | null>(null);
+  // A transcript is read as text; a recording is sent as-is and transcribed on the server.
+  const [file, setFile] = useState<{ name: string; text?: string; recording?: File } | null>(null);
   const [running, setRunning] = useState(false);
   const [log, setLog] = useState<ImportProgress[]>([]);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
@@ -52,7 +54,7 @@ export const MeetingImportModal: React.FC<Props> = ({ isOpen, zoomConnected, llm
   const pickFile = async (f: File | undefined) => {
     reset();
     if (!f) return setFile(null);
-    setFile({ name: f.name, text: await f.text() });
+    setFile(isAudioFilename(f.name) ? { name: f.name, recording: f } : { name: f.name, text: await f.text() });
   };
 
   const start = async () => {
@@ -61,15 +63,23 @@ export const MeetingImportModal: React.FC<Props> = ({ isOpen, zoomConnected, llm
     const controller = new AbortController();
     abortRef.current = controller;
     try {
-      const body = tab === 'zoom'
-        ? { link, title: title || undefined }
-        : { transcript: file?.text ?? '', filename: file?.name, title: title || undefined };
-      const res = await fetch('/api/meeting/import', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
+      let res: Response;
+      if (tab === 'file' && file?.recording) {
+        const form = new FormData();
+        form.append('file', file.recording);
+        if (title) form.append('title', title);
+        res = await fetch('/api/meeting/import', { method: 'POST', body: form, signal: controller.signal });
+      } else {
+        const body = tab === 'zoom'
+          ? { link, title: title || undefined }
+          : { transcript: file?.text ?? '', filename: file?.name, title: title || undefined };
+        res = await fetch('/api/meeting/import', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        });
+      }
       if (!res.ok || !res.body) {
         const data = await res.json().catch(() => ({}));
         setOutcome({ status: 'invalid_input', message: data.error || `Request failed (${res.status})` });
@@ -129,7 +139,7 @@ export const MeetingImportModal: React.FC<Props> = ({ isOpen, zoomConnected, llm
 
           <div className="inline-flex bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-0.5">
             <button className={tabCls(tab === 'zoom')} onClick={() => { setTab('zoom'); reset(); }}><Video size={13} /> Zoom link</button>
-            <button className={tabCls(tab === 'file')} onClick={() => { setTab('file'); reset(); }}><Upload size={13} /> Transcript file</button>
+            <button className={tabCls(tab === 'file')} onClick={() => { setTab('file'); reset(); }}><Upload size={13} /> File</button>
           </div>
 
           {tab === 'zoom' ? (
@@ -145,7 +155,7 @@ export const MeetingImportModal: React.FC<Props> = ({ isOpen, zoomConnected, llm
                   placeholder="https://us02web.zoom.us/j/85012345678"
                   className={`${inputCls} font-mono`}
                 />
-                <p className="text-[10px] text-zinc-500 mt-1">A past meeting in your Zoom account with cloud recording transcript or AI Companion summary.</p>
+                <p className="text-[10px] text-zinc-500 mt-1">A past meeting in your Zoom account with a cloud recording transcript or AI Companion summary. Free plans record to your computer only — upload that recording under File instead.</p>
               </div>
             ) : (
               <p className="text-[11px] text-zinc-600 dark:text-zinc-400 bg-zinc-50 dark:bg-zinc-900/60 rounded-lg p-3">
@@ -155,9 +165,15 @@ export const MeetingImportModal: React.FC<Props> = ({ isOpen, zoomConnected, llm
           ) : (
             <label className="flex flex-col items-center justify-center gap-1.5 px-4 py-6 rounded-lg border-2 border-dashed border-zinc-200 dark:border-zinc-800 cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-900/60 text-center">
               <Upload size={18} className="text-zinc-400" />
-              <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">{file ? file.name : 'Choose a .vtt or .txt transcript'}</span>
-              <span className="text-[10px] text-zinc-500">Download it from the Zoom web portal → Recordings → Audio transcript</span>
-              <input type="file" accept=".vtt,.txt,.md,text/vtt,text/plain" className="sr-only" onChange={e => pickFile(e.target.files?.[0])} />
+              <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                {file ? `${file.name}${file.recording ? ` · ${(file.recording.size / 1024 / 1024).toFixed(1)} MB` : ''}` : 'Choose a transcript or a recording'}
+              </span>
+              <span className="text-[10px] text-zinc-500">
+                {file?.recording
+                  ? 'Transcribed with your OpenAI key first (about $0.006 per minute), then requirements are extracted.'
+                  : 'Transcript: .vtt or .txt · Recording: .m4a, .mp4, .mp3 or .wav (e.g. Documents/Zoom/<meeting>/audio….m4a)'}
+              </span>
+              <input type="file" accept={`.vtt,.txt,.md,text/vtt,text/plain,${AUDIO_EXTENSIONS.map(e => `.${e}`).join(',')},audio/*,video/mp4`} className="sr-only" onChange={e => pickFile(e.target.files?.[0])} />
             </label>
           )}
 

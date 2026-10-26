@@ -143,8 +143,14 @@ export class ZoomMcpMeetingSource implements MeetingSourcePort, ZoomToolDiscover
       const summary = [...new Set(h.summaries)].join('\n\n').trim() || undefined;
 
       if (!transcript && !summary) {
+        // The meeting itself came back, so it exists — it just has nothing to read
+        // (typical on free plans, which only record to the computer).
+        if (h.topic) {
+          throw new MeetingSourceError('no_transcript',
+            `Found the meeting “${h.topic}”, but it has no cloud recording or AI summary. Free Zoom plans record to your computer only — upload the recording’s audio (.m4a, in Documents/Zoom/<meeting>) under File instead.`);
+        }
         if (transcriptError && /not\s*found|does\s*not\s*exist|no\s+(meeting|recording)|404/i.test(transcriptError)) {
-          throw new MeetingSourceError('not_found', `Zoom couldn’t find meeting ${meetingId} in your account, or it has no cloud recording.`);
+          throw new MeetingSourceError('not_found', `Zoom couldn’t find meeting ${meetingId} in your account, or it has no cloud recording. If it was recorded to your computer, upload the recording (.m4a) under File instead.`);
         }
         throw new MeetingSourceError('no_transcript',
           `Zoom returned no transcript or summary for meeting ${meetingId}. Make sure cloud recording with audio transcript, or AI Companion meeting summary, was on — or upload the transcript file instead.${transcriptError ? ` (Zoom said: ${transcriptError.slice(0, 300)})` : ''}`);

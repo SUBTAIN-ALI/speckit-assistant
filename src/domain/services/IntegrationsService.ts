@@ -183,6 +183,13 @@ export class IntegrationsService {
     return { client: this.llmFactory(p, key, model), provider: p, model };
   }
 
+  // Speech-to-text always uses OpenAI, whichever provider extracts requirements.
+  async openAiKey(): Promise<string> {
+    const key = this.keyFor(await this.store.load(), 'openai');
+    if (!key) throw new NotConfiguredError('Transcribing recordings uses OpenAI. Add an OpenAI API key in Settings, or upload a transcript (.vtt/.txt) instead.');
+    return key;
+  }
+
   // Lists a provider's models, with a key typed into the form (not yet saved) or the stored one.
   async listModels(provider: LlmProvider, apiKey?: string): Promise<string[]> {
     const creds = await this.store.load();

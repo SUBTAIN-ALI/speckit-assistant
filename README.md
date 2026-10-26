@@ -286,6 +286,8 @@ speckit-assistant create-features 2026-10-26-weekly-sync         # AI-suggested 
 
 **What can be imported:** past meetings in your Zoom account that had cloud recording with audio transcript, or AI Companion summaries. Recording share links and personal-room links can't be resolved through Zoom — download the transcript (`.vtt`) and upload it instead.
 
+**Recordings (free Zoom plans):** free accounts record to your computer only (`Documents/Zoom/<meeting>/`), so there's nothing for Zoom MCP to read. Upload the recording's `.m4a` (or `.mp4`, `.mp3`, `.wav`) under **File** instead — it's transcribed with speaker labels using your OpenAI key (`gpt-4o-transcribe-diarize`, about $0.006 per minute), then extracted like any transcript. OpenAI accepts up to 25 MB per file; the audio-only `.m4a` is about 0.5 MB per minute. Longer files are split automatically when `ffmpeg` is installed. The `.conf` file in that folder is Zoom's conversion settings, not a recording. From the CLI: `speckit-assistant import audio1234.m4a`.
+
 **Where things are stored**
 
 | What | Where |

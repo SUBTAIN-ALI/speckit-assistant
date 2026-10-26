@@ -49,7 +49,7 @@ Write `<list-dir>/extraction.json` — JSON only, exactly this shape:
 Also write `<list-dir>/status.json`:
 - On success: `{"status": "ok", "topic": "<meeting topic or empty>", "startTime": "<meeting date/time or empty>"}`
 - If the Zoom meeting can't be found in the account: `{"status": "not_found", "message": "…"}`
-- If it has no transcript and no summary: `{"status": "no_transcript", "message": "…"}`
+- If it has no transcript and no summary: `{"status": "no_transcript", "message": "…"}`. When the meeting itself was found (you know its topic), say so in the message: "Found the meeting “<topic>”, but it has no cloud recording or AI summary. Free Zoom plans record to your computer only — upload the recording's audio (.m4a) under File instead."
 - If the Zoom tools reject the sign-in: `{"status": "auth_required", "message": "…"}`
 
 End with a one-line `SUMMARY:` of how many requirements you wrote.

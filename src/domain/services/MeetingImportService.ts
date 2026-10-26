@@ -20,9 +20,11 @@ import { chunkTranscript, normalizeTranscript } from './transcript';
 import { parseMeetingInput } from './zoomLink';
 import { priceFor } from './pricing';
 import { MeetingAgentRunner } from './MeetingAgentRunner';
+import { TranscriberPort, TranscriptionError } from '../ports/out/TranscriberPort';
+import { formatSegments, secondsToClock } from './transcript';
 
 // Meeting → requirements pipeline:
-//   resolve input → fetch (Zoom MCP or uploaded text) → save snapshot →
+//   [recording → speech-to-text →] resolve input → fetch (Zoom MCP or uploaded text) → save snapshot →
 //   LLM extraction (structured JSON, validated, one retry) → requirements.md.
 // Every import creates its own requirement set in .specify/meetings/<setId>/,
 // which is added to the workspace .gitignore so transcripts are never committed
@@ -30,13 +32,19 @@ import { MeetingAgentRunner } from './MeetingAgentRunner';
 
 export type ImportInput =
   | { type: 'link'; value: string }
-  | { type: 'transcript'; text: string; filename?: string };
+  | { type: 'transcript'; text: string; filename?: string }
+  // A meeting recording (e.g. Zoom's local .m4a); transcribed with OpenAI first.
+  | { type: 'audio'; data: Buffer; filename: string };
+
+type TextInput = Exclude<ImportInput, { type: 'audio' }>;
 
 export type ImportRequest = {
   workspacePath: string;
   input: ImportInput;
   title?: string; // name for the new set; defaults to the meeting topic / file name
 };
+
+type TextRequest = Omit<ImportRequest, 'input'> & { input: TextInput };
 
 export type ImportOutcome = {
   status: ImportStatus;
@@ -60,19 +68,68 @@ export class MeetingImportService {
     private executionHistory: ExecutionHistoryPort,
     private now: () => number = Date.now,
     // Agent engine: the active agent runs /speckit.meetings.import (default).
-    private agent?: MeetingAgentRunner
+    private agent?: MeetingAgentRunner,
+    private transcriber?: TranscriberPort
   ) {}
 
   async import(req: ImportRequest, onProgress?: (p: ImportProgress) => void): Promise<ImportOutcome> {
-    if (this.agent && (await this.integrations.getEngine()) === 'agent') {
-      return this.importWithAgent(this.agent, req, onProgress);
+    let text: TextRequest;
+    let transcribed: { note: string; costUSD: number } | undefined;
+    if (req.input.type === 'audio') {
+      const t = await this.transcribe(req.input, onProgress);
+      if ('status' in t) return t;
+      text = { ...req, input: t.input };
+      transcribed = t;
+    } else {
+      text = { ...req, input: req.input };
     }
-    return this.importDirect(req, onProgress);
+    const outcome = this.agent && (await this.integrations.getEngine()) === 'agent'
+      ? await this.importWithAgent(this.agent, text, onProgress)
+      : await this.importDirect(text, onProgress);
+    if (transcribed && outcome.status === 'ok') {
+      outcome.message = `${transcribed.note} ${outcome.message}`;
+      if (outcome.cost?.costUSD !== undefined) outcome.cost = { ...outcome.cost, costUSD: outcome.cost.costUSD + transcribed.costUSD };
+    }
+    return outcome;
+  }
+
+  // ---------- recordings ----------
+
+  // Recording → "[hh:mm:ss] Speaker A: …" transcript, then the normal text path.
+  private async transcribe(input: Extract<ImportInput, { type: 'audio' }>, onProgress?: (p: ImportProgress) => void):
+    Promise<{ input: TextInput; note: string; costUSD: number } | ImportOutcome> {
+    if (!this.transcriber) return fail('not_configured', 'Transcribing recordings isn’t available in this build.');
+    let apiKey: string;
+    try {
+      apiKey = await this.integrations.openAiKey();
+    } catch (err) {
+      if (err instanceof NotConfiguredError) return fail('not_configured', err.message);
+      throw err;
+    }
+    const mb = (input.data.length / 1024 / 1024).toFixed(1);
+    onProgress?.({ step: 'transcribing', message: `Transcribing ${input.filename} (${mb} MB) with OpenAI…` });
+    try {
+      const result = await this.transcriber.transcribe(apiKey, input, message => onProgress?.({ step: 'transcribing', message }));
+      const text = formatSegments(result.segments);
+      if (!text.trim()) return fail('transcription_error', 'No speech was found in the recording.');
+      const length = result.durationSec ? ` (${secondsToClock(result.durationSec)})` : '';
+      const price = result.costUSD === undefined ? '' : result.costUSD < 0.01 ? ', under $0.01' : `, about $${result.costUSD.toFixed(2)}`;
+      return {
+        input: { type: 'transcript', text, filename: input.filename },
+        note: `Transcribed the recording${length} with ${result.model}${price}.`,
+        costUSD: result.costUSD ?? 0,
+      };
+    } catch (err) {
+      if (err instanceof TranscriptionError) {
+        return fail(err.code === 'unsupported' || err.code === 'too_large' ? 'invalid_input' : 'transcription_error', err.message);
+      }
+      return fail('transcription_error', err instanceof Error ? err.message : String(err));
+    }
   }
 
   // ---------- agent engine ----------
 
-  private async importWithAgent(agent: MeetingAgentRunner, req: ImportRequest, onProgress?: (p: ImportProgress) => void): Promise<ImportOutcome> {
+  private async importWithAgent(agent: MeetingAgentRunner, req: TextRequest, onProgress?: (p: ImportProgress) => void): Promise<ImportOutcome> {
     const { workspacePath, input } = req;
     let meetingId: string | undefined;
     if (input.type === 'link') {
@@ -205,7 +262,7 @@ export class MeetingImportService {
 
   // ---------- direct engine (this app calls the AI provider) ----------
 
-  private async importDirect(req: ImportRequest, onProgress?: (p: ImportProgress) => void): Promise<ImportOutcome> {
+  private async importDirect(req: TextRequest, onProgress?: (p: ImportProgress) => void): Promise<ImportOutcome> {
     const { workspacePath, input } = req;
 
     // Check the cheap preconditions before touching Zoom or the LLM.

@@ -8,6 +8,8 @@ import { workflowService, meetingImportService, requirementsService, featureCrea
 import { activeAgent, toAgentConfig } from '../domain/models/agents';
 import { FeatureGroup, slugify } from '../domain/services/featureGrouping';
 import { WorkflowPhase, AgentConfig, AgentType } from '../domain/models/types';
+import { ImportInput } from '../domain/services/MeetingImportService';
+import { isAudioFilename } from '../domain/services/transcript';
 
 const args = process.argv.slice(2);
 
@@ -84,7 +86,7 @@ Usage:
   speckit-assistant discard <phase> [feature]   Reset/discard a phase
   speckit-assistant create <feature>  Create a new feature folder
   speckit-assistant delete <feature>  Delete a feature folder
-  speckit-assistant import <file|zoom-link> [--title <name>]   Import a meeting into a new requirement list
+  speckit-assistant import <file|zoom-link> [--title <name>]   Import a meeting (transcript, recording or Zoom link) into a new requirement list
   speckit-assistant requirements [list]                        List requirement lists, or one list's requirements
   speckit-assistant create-features <list> [--single] [--all]  Create Spec Kit features from accepted requirements
   speckit-assistant run <phase> [feature] [--agent <type>] [--prompt <text>]  Run an agent phase
@@ -289,12 +291,15 @@ function flagValue(cmdArgs: string[], flag: string): string | undefined {
 
 async function importMeeting(cmdArgs: string[]) {
   const source = cmdArgs[0];
-  if (!source) throw new Error('Usage: import <transcript-file | zoom-link | meeting-id> [--title <name>]');
+  if (!source) throw new Error('Usage: import <transcript-file | recording | zoom-link | meeting-id> [--title <name>]');
   const title = flagValue(cmdArgs, '--title');
-  const input = fs.existsSync(source) && fs.statSync(source).isFile()
-    ? { type: 'transcript' as const, text: fs.readFileSync(source, 'utf-8'), filename: path.basename(source) }
-    : { type: 'link' as const, value: source };
-  console.log(`Importing ${input.type === 'transcript' ? input.filename : source}...`);
+  const filename = path.basename(source);
+  const input: ImportInput = !(fs.existsSync(source) && fs.statSync(source).isFile())
+    ? { type: 'link', value: source }
+    : isAudioFilename(filename)
+      ? { type: 'audio', data: fs.readFileSync(source), filename }
+      : { type: 'transcript', text: fs.readFileSync(source, 'utf-8'), filename };
+  console.log(`Importing ${input.type === 'link' ? source : filename}...`);
   const out = await meetingImportService.import({ workspacePath, input, title }, p => console.log(`  · ${p.message}`));
   if (out.status !== 'ok') throw new Error(out.message);
   console.log(`✅ ${out.message}`);

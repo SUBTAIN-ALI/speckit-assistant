@@ -153,6 +153,18 @@ describe('ZoomMcpMeetingSource (against a real MCP server)', () => {
     expect(err.message).toContain('list_users');
   });
 
+  it('says the meeting was found but has no cloud recording (free plan)', async () => {
+    // What Zoom returns for a meeting recorded locally: the meeting, but no recording.
+    tools = [
+      { name: 'get_meeting_assets', inputSchema: meetingIdSchema, handler: () => ({ content: [{ type: 'text', text: JSON.stringify({ meeting: { topic: 'Sam’s Zoom Meeting', start_time: '2026-10-25T06:22:58Z' } }) }] }) },
+      { name: 'get_recording_resource', inputSchema: meetingIdSchema, handler: () => ({ isError: true, content: [{ type: 'text', text: '404: This recording does not exist. (3301)' }] }) },
+    ];
+    const err = await source().src.fetchMeeting('89941818147').catch(e => e);
+    expect(err.code).toBe('no_transcript');
+    expect(err.message).toContain('Found the meeting “Sam’s Zoom Meeting”');
+    expect(err.message).toContain('.m4a');
+  });
+
   it('uses the summary when only an assets tool exists', async () => {
     tools = [{ name: 'get_meeting_assets', inputSchema: meetingIdSchema, handler: () => ({ content: [{ type: 'text', text: 'Summary: decided to add SSO.' }] }) }];
     const { snapshot } = await source().src.fetchMeeting('85012345678');

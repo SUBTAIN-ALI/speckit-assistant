@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseVtt, normalizeTranscript, chunkTranscript, isVtt, formatTranscript } from './transcript';
+import { parseVtt, normalizeTranscript, chunkTranscript, isVtt, formatTranscript, formatSegments, secondsToClock, isAudioFilename } from './transcript';
 
 const ZOOM_VTT = `WEBVTT
 
@@ -60,5 +60,32 @@ describe('transcript', () => {
   it('hard-splits a single line longer than the limit', () => {
     const chunks = chunkTranscript('x'.repeat(450), 200);
     expect(chunks.map(c => c.length)).toEqual([200, 200, 50]);
+  });
+});
+
+describe('formatSegments', () => {
+  it('labels speakers, merges consecutive segments and formats times', () => {
+    expect(formatSegments([
+      { start: 1.4, speaker: 'A', text: ' We need promo codes. ' },
+      { start: 4, speaker: 'A', text: 'At checkout.' },
+      { start: 3725, speaker: 'B', text: 'Agreed.' },
+      { start: 3730, speaker: 'B', text: '   ' },
+    ])).toBe('[00:00:01] Speaker A: We need promo codes. At checkout.\n[01:02:05] Speaker B: Agreed.');
+  });
+
+  it('keeps unlabelled segments (whisper) as separate lines', () => {
+    expect(formatSegments([{ start: 0, text: 'One.' }, { start: 2, text: 'Two.' }])).toBe('[00:00:00] One.\n[00:00:02] Two.');
+  });
+
+  it('clamps and floors clock times', () => {
+    expect(secondsToClock(-3)).toBe('00:00:00');
+    expect(secondsToClock(59.9)).toBe('00:00:59');
+  });
+
+  it('recognises recordings by extension', () => {
+    expect(isAudioFilename('audio1234.M4A')).toBe(true);
+    expect(isAudioFilename('video.mp4')).toBe(true);
+    expect(isAudioFilename('recording.conf')).toBe(false);
+    expect(isAudioFilename('meeting.vtt')).toBe(false);
   });
 });

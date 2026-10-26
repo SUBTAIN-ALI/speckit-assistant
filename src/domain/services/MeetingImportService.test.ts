@@ -7,6 +7,7 @@ import { LlmError, LlmJsonResponse } from '../ports/out/LlmPort';
 import { MeetingFetchResult, MeetingSourceError, MeetingSourcePort } from '../ports/out/MeetingSourcePort';
 import { parseRequirements } from './requirementsMarkdown';
 import { ImportProgress } from '../models/meeting';
+import { AudioInput, TranscriberPort, TranscriptionError, TranscriptionResult } from '../ports/out/TranscriberPort';
 
 const extraction = (...titles: string[]) => ({
   title: 'Checkout',
@@ -195,5 +196,60 @@ describe('MeetingImportService', () => {
     const gi = ws.files.get('.gitignore')!;
     expect(gi.startsWith('node_modules\n')).toBe(true);
     expect(gi.split('\n').filter(l => l === GITIGNORE_ENTRY)).toHaveLength(1);
+  });
+
+  describe('recordings', () => {
+    class FakeTranscriber implements TranscriberPort {
+      calls: Array<{ apiKey: string; filename: string }> = [];
+      constructor(private result: TranscriptionResult | Error) {}
+      async transcribe(apiKey: string, audio: AudioInput, onProgress?: (m: string) => void) {
+        this.calls.push({ apiKey, filename: audio.filename });
+        onProgress?.('Transcribing the recording with OpenAI…');
+        if (this.result instanceof Error) throw this.result;
+        return this.result;
+      }
+    }
+    const RESULT: TranscriptionResult = {
+      segments: [{ start: 5, end: 8, speaker: 'A', text: 'We need password reset.' }, { start: 9, end: 10, speaker: 'B', text: 'Agreed.' }],
+      durationSec: 125, model: 'gpt-4o-transcribe-diarize', costUSD: 0.0125,
+    };
+    const runAudio = (transcriber: FakeTranscriber) => {
+      const progress: ImportProgress[] = [];
+      const integrations = new IntegrationsService(creds, () => llm, {});
+      const svc = new MeetingImportService(ws, new RequirementsService(ws, undefined, () => 1_000), integrations, () => source, history, () => 1_000, undefined, transcriber);
+      return svc.import({ workspacePath: '/ws', input: { type: 'audio', data: Buffer.from('audio'), filename: 'audio0123.m4a' } }, p => progress.push(p))
+        .then(o => ({ ...o, progress }));
+    };
+
+    it('transcribes the recording, then extracts from the transcript', async () => {
+      const t = new FakeTranscriber(RESULT);
+      const out = await runAudio(t);
+      expect(out.status).toBe('ok');
+      expect(t.calls).toEqual([{ apiKey: 'sk-test-key-1234', filename: 'audio0123.m4a' }]);
+      expect(out.message).toMatch(/^Transcribed the recording \(00:02:05\) with gpt-4o-transcribe-diarize, about \$0\.01\. Added 2 requirements/);
+      expect(out.setId).toBe('1970-01-01-audio0123');
+      expect(ws.files.get(`${dir(out.setId!)}/transcript.md`)).toBe('[00:00:05] Speaker A: We need password reset.\n[00:00:09] Speaker B: Agreed.\n');
+      expect(llm.calls[0].user).toContain('Speaker A: We need password reset.');
+      expect(out.progress[0].step).toBe('transcribing');
+      expect(out.cost!.costUSD).toBeGreaterThanOrEqual(0.0125);
+    });
+
+    it('needs an OpenAI key even when another provider extracts', async () => {
+      creds = new MemoryCredentials({ llm: { provider: 'anthropic', keys: { anthropic: 'sk-ant-test' }, models: {} } });
+      const t = new FakeTranscriber(RESULT);
+      const out = await runAudio(t);
+      expect(out.status).toBe('not_configured');
+      expect(out.message).toContain('OpenAI');
+      expect(t.calls).toHaveLength(0);
+    });
+
+    it('reports transcription failures without creating a list', async () => {
+      const out = await runAudio(new FakeTranscriber(new TranscriptionError('too_large', 'This recording is 300 MB')));
+      expect(out).toMatchObject({ status: 'invalid_input', message: 'This recording is 300 MB' });
+      expect([...ws.files.keys()].some(k => k.startsWith('.specify/meetings/'))).toBe(false);
+
+      const silent = await runAudio(new FakeTranscriber({ ...RESULT, segments: [] }));
+      expect(silent).toMatchObject({ status: 'transcription_error', message: 'No speech was found in the recording.' });
+    });
   });
 });

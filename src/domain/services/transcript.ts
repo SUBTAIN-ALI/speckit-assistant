@@ -77,3 +77,30 @@ export function chunkTranscript(text: string, maxChars: number): string[] {
   if (current) chunks.push(current);
   return chunks;
 }
+
+// Timestamped speech segments (from audio transcription) → transcript lines,
+// merging consecutive segments from the same speaker.
+export function formatSegments(segments: Array<{ start: number; speaker?: string; text: string }>): string {
+  const lines: TranscriptLine[] = [];
+  for (const s of segments) {
+    const text = s.text.trim();
+    if (!text) continue;
+    const speaker = s.speaker ? `Speaker ${s.speaker}` : undefined;
+    const prev = lines[lines.length - 1];
+    if (prev && speaker && prev.speaker === speaker) prev.text = `${prev.text} ${text}`;
+    else lines.push({ start: secondsToClock(s.start), speaker, text });
+  }
+  return formatTranscript(lines);
+}
+
+export function secondsToClock(total: number): string {
+  const s = Math.max(0, Math.floor(total));
+  return [Math.floor(s / 3600), Math.floor((s % 3600) / 60), s % 60].map(n => String(n).padStart(2, '0')).join(':');
+}
+
+// Audio/video files the transcription path accepts (by extension).
+export const AUDIO_EXTENSIONS = ['m4a', 'mp3', 'mp4', 'mpeg', 'mpga', 'wav', 'webm', 'ogg', 'flac'];
+
+export function isAudioFilename(name: string): boolean {
+  return AUDIO_EXTENSIONS.includes((name.split('.').pop() ?? '').toLowerCase());
+}

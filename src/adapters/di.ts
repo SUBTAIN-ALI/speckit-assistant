@@ -10,6 +10,7 @@ import { ProcessSpecifyRunner } from './secondary/cli/ProcessSpecifyRunner';
 import { WorkflowService } from '../domain/services/WorkflowService';
 import { FSCredentialStore } from './secondary/fs/FSCredentialStore';
 import { createLlmClient } from './secondary/llm';
+import { OpenAiTranscriber } from './secondary/llm/OpenAiTranscriber';
 import { ZoomAuth } from './secondary/zoom/ZoomAuth';
 import { ZoomMcpMeetingSource } from './secondary/zoom/ZoomMcpMeetingSource';
 import { IntegrationsService } from '../domain/services/IntegrationsService';
@@ -57,7 +58,8 @@ export const meetingImportService = new MeetingImportService(
   () => zoomMeetingSource,
   executionHistory,
   Date.now,
-  meetingAgentRunner
+  meetingAgentRunner,
+  new OpenAiTranscriber()
 );
 export const featureCreationService = new FeatureCreationService(
   workspaceRepo, requirementsService, integrationsService, workflowService, meetingAgentRunner, executionHistory
