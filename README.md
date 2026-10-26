@@ -75,6 +75,7 @@ SpecKit Assistant acts as the **Visual Dashboard** and **Command-Line Interface*
 * 📝 **WYSIWYG Markdown Editor**: Edit specifications or plans with a formatting toolbar (Bold, Italic, Headings, Code Blocks, Tables, Checklists), with support for alternating-row Vercel-style tables.
 * 🔄 **Conflict & Change Guard**: A live watcher (`chokidar` + SSE) detects external changes on disk and alerts you in case of editing conflicts.
 * 💾 **Persistent State**: Automatically remembers your active workspace inside `~/.speckit-assistant-config.json`.
+* 🎙️ **Meeting → Requirements → Features**: A **Requirements** section (and CLI) that imports a Zoom meeting or transcript, turns it into reviewable requirements, and creates Spec Kit features from the accepted ones. Runs through your active agent with the bundled **`spec-kit-meetings`** extension and a Zoom server in MCP Tools — see [Meeting → Requirements](#-meeting--requirements-zoom).
 
 ---
 
@@ -109,6 +110,7 @@ For a detailed analysis of our architectural decisions, read our **Architecture 
 * [ADR 001: Hexagonal Architecture (Ports and Adapters)](docs/adr-001-hexagonal-architecture.md)
 * [ADR 002: State Synchronization and Agent Dispatch](docs/adr-002-state-sync-and-agent-dispatch.md)
 * [ADR 003: Meeting → Requirements via Zoom MCP and user-provided AI keys](docs/adr-003-meeting-requirements.md)
+* [ADR 004: Agent-driven meetings extension (aligning ADR 003 with the agent/extension model)](docs/adr-004-agent-meetings-extension.md)
 
 ---
 
@@ -252,15 +254,35 @@ Zoom link ─► Zoom MCP server (transcript + AI summary) ─► your AI provid
 
 **Create features** (needs Spec Kit initialized in the workspace and an agent selected under *Agents*): select the accepted requirements, let the AI suggest how to split them into features (or put everything in one), adjust names and membership, then create. Each feature gets a Spec Kit-numbered folder, a committed copy of its requirements (`specs/NNN-name/requirements.md`), and a `spec.md` written by Spec Kit with REQ IDs kept for traceability. Open questions become `[NEEDS CLARIFICATION]` items for the Clarify phase. Editing a requirement that is already part of a feature updates that copy and marks the feature's spec as stale.
 
-**Setup (Requirements → Settings)**
+**Setup**
 
-1. **AI provider** — pick OpenAI, Anthropic (Claude) or Google (Gemini) and paste your own API key. *Test key* checks it and lists the models you can use. `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` and `GEMINI_API_KEY` are also honored.
-2. **Zoom** (optional — uploads work without it). Zoom's MCP server only accepts registered OAuth apps, so each user creates their own:
-   - In the [Zoom App Marketplace](https://marketplace.zoom.us/develop/create), create a **General App** with **user-managed** OAuth.
-   - Zoom only accepts **public https** redirect URLs (it rejects `localhost` and `127.0.0.1`), so expose the callback through a tunnel, e.g. `ngrok http 3000` (a free static ngrok domain keeps the URL stable) or `cloudflared tunnel --url http://127.0.0.1:3000`. Use port 18080 when running via the CLI. Only `GET /api/integrations/zoom/callback` is served through the tunnel; everything else stays local-only.
-   - Paste the tunnel's https address into **Public callback URL** in Settings and save. Then copy the redirect URL shown there (e.g. `https://your-name.ngrok-free.app/api/integrations/zoom/callback`) into both **OAuth Redirect URL** and **OAuth Allow List** on the Zoom app.
-   - Add the read-only scopes `meeting:read:search`, `meeting:read:assets`, `cloud_recording:read:list_user_recordings`, `cloud_recording:read:content`.
-   - Paste the Client ID / Secret, save, and click **Connect Zoom**. *Test connection* lists the server's tools.
+Start the app on your project: `npx speckit-assistant -w /path/to/project` (remembered for next time). The project needs Spec Kit (`specify init --here --ai <agent>`, or the one-click installer in **Extensions**).
+
+Pick a **requirements engine** in *Requirements → Settings*:
+
+| | **Agent** (default) | **Direct API** |
+|---|---|---|
+| Who extracts & groups | Your active agent runs `/speckit.meetings.import` / `/speckit.meetings.group` | This app calls OpenAI / Claude / Gemini |
+| Needs | **Extensions → Meeting Requirements**; for Zoom links, **MCP Tools → Add Zoom**, assigned to the agent in **Agents** | An API key in Settings (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY` also honored) |
+| Speed | About a minute per meeting (an agent run) | Seconds |
+
+In agent mode Claude runs these commands unattended with least privilege: print mode, `--permission-mode dontAsk`, only reading, editing files inside the requirement list's folder, and the Zoom MCP tools. Anything else is refused rather than prompted. If you already had an API key configured, the engine stays on **Direct** until you switch.
+
+**Zoom** (optional — transcript uploads work without it). Zoom's MCP server only accepts registered OAuth apps, so each user creates their own:
+- In the [Zoom App Marketplace](https://marketplace.zoom.us/develop/create), create a **General App** with **user-managed** OAuth. If the redirect URL field says *"Custom URLs are only supported in apps that have Meeting SDK feature enabled"*, enable **Features → Embed → Meeting SDK** first.
+- Zoom only accepts **public https** redirect URLs (it rejects `localhost` and `127.0.0.1`), so expose the callback through a tunnel, e.g. `ngrok http 18080` (a free static ngrok domain keeps the URL stable) or `cloudflared tunnel --url http://127.0.0.1:18080` (port 3000 for `pnpm dev`). Only `GET /api/integrations/zoom/callback` is served through the tunnel; everything else stays local-only.
+- Paste the tunnel's https address into **Public callback URL** in Settings and save, then copy the redirect URL shown there into both **OAuth Redirect URL** and **OAuth Allow List** on the Zoom app.
+- Add the read-only scopes `meeting:read:search`, `meeting:read:assets`, `cloud_recording:read:list_user_recordings`, `cloud_recording:read:content`.
+- Paste the Client ID / Secret, save, and click **Connect Zoom**. *Test connection* lists the server's tools.
+- Agent mode: in **MCP Tools** click **Add Zoom** (adds `https://mcp.zoom.us/mcp/meeting/streamable` with `Authorization: Bearer ${ZOOM_MEETINGS_MCP_ACCESS_TOKEN}`, like Zoom's official plugin) and assign it to your agent. The app injects a fresh token into every agent run.
+
+**CLI**
+
+```bash
+speckit-assistant import meeting.vtt --title "Weekly sync"      # or a Zoom link / meeting ID
+speckit-assistant requirements                                   # lists; pass a list id to see its requirements
+speckit-assistant create-features 2026-10-26-weekly-sync         # AI-suggested grouping; --single for one feature
+```
 
 **What can be imported:** past meetings in your Zoom account that had cloud recording with audio transcript, or AI Companion summaries. Recording share links and personal-room links can't be resolved through Zoom — download the transcript (`.vtt`) and upload it instead.
 
