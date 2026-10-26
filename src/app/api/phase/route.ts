@@ -42,10 +42,17 @@ export async function POST(req: Request) {
       const encoder = new TextEncoder();
       const customReadableStream = new ReadableStream({
         async start(controller) {
+          // If the client disconnects, keep the agent run going and stop sending.
+          let open = true;
           const sendEvent = (event: string, data: any) => {
-            controller.enqueue(
-              encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
-            );
+            if (!open) return;
+            try {
+              controller.enqueue(
+                encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
+              );
+            } catch {
+              open = false;
+            }
           };
 
           try {
@@ -68,10 +75,10 @@ export async function POST(req: Request) {
                   personas as PersonaConfig[] | undefined
                 );
             sendEvent('done', { state: finalState });
-            controller.close();
+            if (open) { open = false; try { controller.close(); } catch { /* client gone */ } }
           } catch (err: any) {
             sendEvent('error', { message: err.message });
-            controller.close();
+            if (open) { open = false; try { controller.close(); } catch { /* client gone */ } }
           }
         }
       });

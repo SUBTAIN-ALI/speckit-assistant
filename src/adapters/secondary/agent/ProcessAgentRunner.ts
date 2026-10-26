@@ -10,6 +10,7 @@ import { DevOpsAgent } from "../../../domain/models/devopsAgents";
 import type * as pty from "node-pty";
 import { loadPty } from "../pty/ptyLoader";
 import { meter } from "../../../domain/services/CostMeter";
+import { ClaudeStreamRenderer, costFromResult } from "./claudeStream";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -148,6 +149,9 @@ export class ProcessAgentRunner implements AgentRunnerPort {
       workspacePath,
       procKey: this.phaseKey(featureName, phase),
       feature: phase !== "constitution" ? featureName : null,
+      // Clarify is a Q&A with the user (answered via the terminal); every other
+      // phase is a one-shot task and must exit when done.
+      interactive: phase === "clarification",
       doneTag: phase,
       agentConfig,
       fullPrompt,
@@ -246,10 +250,15 @@ export class ProcessAgentRunner implements AgentRunnerPort {
     // from SPECIFY_FEATURE_DIRECTORY first (else the last-specified feature in
     // .specify/feature.json, which is wrong with several features in flight).
     feature?: string | null;
+    // Keep the CLI's interactive session open for user input (e.g. clarify).
+    // Otherwise Claude runs in print mode so the process exits when finished.
+    interactive?: boolean;
   }): Promise<number> {
     const { workspacePath, procKey, doneTag, agentConfig, fullPrompt, onData, onCost } =
       opts;
-    const { cmd, args, stdin } = this.buildSpawnArgs(agentConfig, fullPrompt, opts.restricted);
+    const { cmd, args, stdin } = this.buildSpawnArgs(agentConfig, fullPrompt, opts.restricted, opts.interactive);
+    // Print-mode Claude streams JSON events; render them as readable log lines.
+    const stream = agentConfig.agentType === "claude" && !opts.interactive ? new ClaudeStreamRenderer() : null;
     // Only await when a provider is configured, so runs without one still
     // spawn synchronously (callers may stop/write to the process right away).
     let extraEnv: Record<string, string> = {};
@@ -341,23 +350,30 @@ export class ProcessAgentRunner implements AgentRunnerPort {
 
       child.onData((data: string) => {
         fullOutput += data;
-        onData?.(data);
+        if (!stream) return onData?.(data);
+        const text = stream.push(data);
+        if (text) onData?.(text);
       });
 
       child.onExit(({ exitCode }: { exitCode: number }) => {
         this.activeProcesses.delete(procKey);
+        const rest = stream?.flush();
+        if (rest) onData?.(rest);
         onData?.(`\nProcess exited with code ${exitCode}\n`);
 
-        // Compute and emit the agnostic cost/usage estimate for this run.
+        // Cost/usage: exact when Claude reported it, else the agnostic estimate.
         try {
-          const cost = meter({
-            agentType: agentConfig.agentType,
-            model: opts.persona?.model ?? opts.devops?.model ?? agentConfig.model,
-            promptText: fullPrompt,
-            outputText: fullOutput,
-            durationMs: Date.now() - startTime,
-          });
-          onCost?.(cost);
+          onCost?.(
+            stream?.result
+              ? costFromResult(stream.result)
+              : meter({
+                  agentType: agentConfig.agentType,
+                  model: opts.persona?.model ?? opts.devops?.model ?? agentConfig.model,
+                  promptText: fullPrompt,
+                  outputText: fullOutput,
+                  durationMs: Date.now() - startTime,
+                }),
+          );
         } catch {
           // cost capture is best-effort; never block the run on it
         }
@@ -386,6 +402,7 @@ export class ProcessAgentRunner implements AgentRunnerPort {
     config: AgentConfig,
     prompt: string,
     restricted?: AgentCommand["restricted"],
+    interactive?: boolean,
   ): { cmd: string; args: string[]; stdin?: string } {
     const agentType = config.agentType;
     const cliPath = config.agentPath || this.getDefaultCli(agentType);
@@ -401,6 +418,7 @@ export class ProcessAgentRunner implements AgentRunnerPort {
         cmd: cliPath,
         args: [
           "-p",
+          "--output-format", "stream-json", "--verbose",
           "--permission-mode", "dontAsk",
           "--strict-mcp-config",
           ...servers,
@@ -415,7 +433,11 @@ export class ProcessAgentRunner implements AgentRunnerPort {
       case "claude":
         return {
           cmd: cliPath,
-          args: ["--permission-mode", "bypassPermissions", prompt],
+          // Interactive sessions never exit on their own; one-shot runs use
+          // print mode (exits when done) with a JSON event stream for live logs.
+          args: interactive
+            ? ["--permission-mode", "bypassPermissions", prompt]
+            : ["-p", "--output-format", "stream-json", "--verbose", "--permission-mode", "bypassPermissions", "--", prompt],
         };
       case "gemini":
         return {

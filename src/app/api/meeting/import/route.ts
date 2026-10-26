@@ -1,12 +1,14 @@
 import { NextResponse } from 'next/server';
 import { meetingImportService } from '../../../../adapters/di';
 import { getWorkspacePath } from '../../../../adapters/primary/api/utils';
+import { sseResponse } from '../../../../adapters/primary/api/sse';
 import { ImportInput } from '../../../../domain/services/MeetingImportService';
 
 // 5 MB is far more than a multi-hour transcript; anything bigger is a wrong file.
 const MAX_TRANSCRIPT_BYTES = 5 * 1024 * 1024;
 
 // Streams progress as SSE: `progress` events, then one `done` with the outcome.
+// The import continues if the client disconnects.
 export async function POST(req: Request) {
   try {
     const { link, transcript, filename, title } = await req.json();
@@ -24,26 +26,12 @@ export async function POST(req: Request) {
     }
 
     const workspacePath = getWorkspacePath();
-    const encoder = new TextEncoder();
-    const stream = new ReadableStream({
-      async start(controller) {
-        const send = (event: string, data: unknown) =>
-          controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
-        try {
-          const outcome = await meetingImportService.import(
-            { workspacePath, input, title: typeof title === 'string' ? title : undefined },
-            p => send('progress', p)
-          );
-          send('done', outcome);
-        } catch (err: any) {
-          send('error', { message: err.message });
-        }
-        controller.close();
-      },
-    });
-
-    return new Response(stream, {
-      headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' },
+    return sseResponse(async send => {
+      const outcome = await meetingImportService.import(
+        { workspacePath, input, title: typeof title === 'string' ? title : undefined },
+        p => send('progress', p)
+      );
+      send('done', outcome);
     });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
