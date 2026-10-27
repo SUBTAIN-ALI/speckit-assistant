@@ -15,7 +15,8 @@ import {
   PhaseStatus,
   PersonaConfig,
   PersonaId,
-  PhaseState
+  PhaseState,
+  isPhaseDone
 } from '@/domain/models/types';
 import { DEFAULT_PERSONAS } from '@/domain/models/personas';
 import KanbanBoard from '@/components/KanbanBoard';
@@ -31,6 +32,7 @@ import AboutModal, { APP_VERSION } from '@/components/AboutModal';
 import ExecutionsView from '@/components/ExecutionsView';
 import RequirementsSection from '@/components/RequirementsSection';
 import WorkspaceSwitcher from '@/components/WorkspaceSwitcher';
+import PreviewPanel from '@/components/PreviewPanel';
 import { isWorkflowState } from '@/lib/workflowState';
 import { AgentsFile, DEFAULT_AGENTS, toAgentConfig, activeAgent } from '@/domain/models/agents';
 import { McpFile, DEFAULT_MCP } from '@/domain/models/mcp';
@@ -82,6 +84,13 @@ export default function Dashboard() {
   };
   const agentConsoleRef = React.useRef<AgentConsoleHandle | null>(null);
   const [selectedFile, setSelectedFile] = useState<{ path: string; content: string } | null>(null);
+  // A short message above the editor (e.g. a checkbox that couldn't be ticked).
+  const [editorNotice, setEditorNotice] = useState<string | null>(null);
+  useEffect(() => {
+    if (!editorNotice) return;
+    const t = setTimeout(() => setEditorNotice(null), 6000);
+    return () => clearTimeout(t);
+  }, [editorNotice]);
   
   const [viewMode, setViewMode] = useState<'kanban' | 'dag' | 'executions'>('kanban');
   const [section, setSection] = useState<'workflow' | 'requirements' | 'agents' | 'mcp' | 'extensions'>('workflow');
@@ -105,7 +114,7 @@ export default function Dashboard() {
   const [showAbout, setShowAbout] = useState<boolean>(false);
   const [newFeatureName, setNewFeatureName] = useState<string>('');
   const [running, setRunning] = useState<boolean>(false);
-  const [activeTab, setActiveTab] = useState<'editor' | 'console' | 'terminal'>('editor');
+  const [activeTab, setActiveTab] = useState<'editor' | 'console' | 'terminal' | 'preview'>('editor');
   const [runningPhase, setRunningPhase] = useState<{ phase: WorkflowPhase; featureName: string | null } | null>(null);
   const [isEditorMaximized, setIsEditorMaximized] = useState<boolean>(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
@@ -536,27 +545,24 @@ export default function Dashboard() {
     }
   };
 
+  // Ticks a checkbox in the file being viewed (tasks.md, a checklist, …).
   const handleToggleTask = async (lineIndex: number, checked: boolean) => {
-    if (!state?.activeFeatureName) return;
+    const filePath = selectedFile?.path;
+    if (!filePath) return;
     try {
       const res = await fetch('/api/task', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          featureName: state.activeFeatureName,
-          lineIndex,
-          checked
-        }),
+        body: JSON.stringify({ filePath, lineIndex, checked }),
       });
       const data = await res.json();
-      setState(data);
-      
-      // Reload the tasks file content to show updated preview
-      const activeFeature = data.features.find((f: any) => f.name === data.activeFeatureName);
-      const tasksPhase = activeFeature?.phases.find((p: any) => p.phase === 'tasks');
-      if (tasksPhase?.filePath && selectedFile?.path === tasksPhase.filePath) {
-        handleLoadFile(tasksPhase.filePath);
+      if (!res.ok) {
+        setEditorNotice(data.error || 'Couldn’t update the checkbox.');
+      } else {
+        setState(data);
       }
+      // Show the file as it is on disk now (ticked, or unchanged on error).
+      handleLoadFile(filePath);
     } catch (err) {
       console.error(err);
     }
@@ -624,7 +630,36 @@ export default function Dashboard() {
     fetchState();
   };
 
-  const handleRunPhase = async (phase: WorkflowPhase, featureName: string | null) => {
+  // Quick build (Specification card): approve the spec, skip to Implementation, build now.
+  const handleQuickBuild = async (featureName: string) => {
+    agentConsoleRef.current?.clear();
+    setRunning(true);
+    setActiveTab('console');
+    setRunningPhase({ phase: 'implementation', featureName });
+    try {
+      if (state?.activeFeatureName !== featureName) await handleSelectFeature(featureName);
+      const response = await fetch('/api/phase', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'quick-build', phase: 'implementation', featureName, agentConfig, personas: personaConfigs }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        agentConsoleRef.current?.write(`\r\n\x1b[31mQuick build failed: ${data.error ?? response.status}\x1b[0m\r\n`);
+        setRunning(false);
+        setRunningPhase(null);
+        return;
+      }
+      await consumePhaseStream(response, 'implementation', featureName);
+    } catch (err: any) {
+      agentConsoleRef.current?.write(`\r\n\x1b[31mExecution failed: ${err.message}\x1b[0m\r\n`);
+      setRunning(false);
+      setRunningPhase(null);
+    }
+  };
+
+  // promptOverride: e.g. the user's answer to a question the agent stopped on.
+  const handleRunPhase = async (phase: WorkflowPhase, featureName: string | null, promptOverride?: string) => {
     agentConsoleRef.current?.clear();
     setRunning(true);
     setActiveTab('console');
@@ -639,7 +674,7 @@ export default function Dashboard() {
           phase,
           featureName: featureName || state?.activeFeatureName,
           agentConfig,
-          prompt,
+          prompt: promptOverride ?? prompt,
           // The implementation phase runs the persona review gate after the
           // /speckit.implement step. Other phases ignore this field.
           ...(phase === 'implementation' ? { personas: personaConfigs } : {})
@@ -726,6 +761,24 @@ export default function Dashboard() {
     }).catch(() => {});
   };
 
+  // Closes an interactive phase (Clarify) and sends it to review.
+  const handleFinishPhase = async (phase: WorkflowPhase, featureName: string | null) => {
+    try {
+      const res = await fetch('/api/phase', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'finish', phase, featureName: featureName || state?.activeFeatureName || null }),
+      });
+      const next = await res.json();
+      if (isWorkflowState(next)) setState(next);
+    } catch (err) {
+      console.error('Failed to finish phase', err);
+    } finally {
+      setRunning(false);
+      setRunningPhase(null);
+    }
+  };
+
   const handleStopPhase = async (phase: WorkflowPhase, featureName: string | null) => {
     try {
       const targetFeature = featureName || state?.activeFeatureName || null;
@@ -805,7 +858,7 @@ export default function Dashboard() {
 
     const getActivePhase = (): WorkflowPhase | 'completed' => {
       for (const p of feature.phases) {
-        if (p.status !== 'approved') return p.phase;
+        if (!isPhaseDone(p.status)) return p.phase;
       }
       return 'completed';
     };
@@ -872,7 +925,7 @@ export default function Dashboard() {
     if (!feat) return { phase: 'specification', label: 'Specification' };
     
     for (const p of feat.phases) {
-      if (p.status !== 'approved') {
+      if (!isPhaseDone(p.status)) {
         return { phase: p.phase, label: PHASE_LABELS[p.phase] };
       }
     }
@@ -1159,7 +1212,7 @@ export default function Dashboard() {
                         handleStopPhase(runningPhase.phase, runningPhase.featureName);
                       }
                     }}
-                    className="w-full mt-2 py-1.5 bg-red-650 hover:bg-red-700 text-white rounded-md text-xs font-semibold transition flex items-center justify-center gap-1"
+                    className="w-full mt-2 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-md text-xs font-semibold transition flex items-center justify-center gap-1"
                   >
                     <X size={10} /> Stop Execution
                   </button>
@@ -1199,6 +1252,13 @@ export default function Dashboard() {
                       onRerunGate={handleRerunGate}
                       onOpenReview={(name, phaseState) => setAuditingFeature({ name, phaseState })}
                       onStopPhase={handleStopPhase}
+                      onFinishPhase={handleFinishPhase}
+                      onAnswerPhase={(phase, feature, answer) => handleRunPhase(phase, feature, answer)}
+                      onQuickBuild={handleQuickBuild}
+                      onPreview={async (feature) => {
+                        if (state?.activeFeatureName !== feature) await handleSelectFeature(feature);
+                        setActiveTab('preview');
+                      }}
                     />
                   ) : viewMode === 'dag' ? (
                     <DagMap
@@ -1247,6 +1307,12 @@ export default function Dashboard() {
                   >
                     WORKSPACE TERMINAL
                   </button>
+                  <button
+                    onClick={() => setActiveTab('preview')}
+                    className={`text-xs font-bold tracking-wide transition pb-1 border-b-2 ${activeTab === 'preview' ? 'text-black dark:text-white border-black dark:border-white' : 'text-zinc-400 border-transparent'}`}
+                  >
+                    PREVIEW
+                  </button>
                 </div>
                 <button
                   onClick={() => setIsEditorMaximized(!isEditorMaximized)}
@@ -1260,7 +1326,11 @@ export default function Dashboard() {
               {/* Lower split content */}
               <div className="flex-1 min-h-0 overflow-hidden">
                 {activeTab === 'editor' && (
-                  <div className="h-full p-3 bg-white dark:bg-black">
+                  <div className="h-full p-3 bg-white dark:bg-black flex flex-col gap-2">
+                    {editorNotice && (
+                      <p role="alert" className="shrink-0 text-[11px] text-amber-700 dark:text-amber-400 bg-amber-500/10 rounded-md px-2 py-1">{editorNotice}</p>
+                    )}
+                    <div className="flex-1 min-h-0">
                     <MarkdownEditor
                       filePath={selectedFile?.path || null}
                       initialContent={selectedFile?.content || null}
@@ -1271,6 +1341,7 @@ export default function Dashboard() {
                       onToggleMaximize={() => setIsEditorMaximized(!isEditorMaximized)}
                       onSelectFile={handleLoadFile}
                     />
+                    </div>
                   </div>
                 )}
                 {/* Kept mounted (hidden when inactive) so streamed agent output
@@ -1287,6 +1358,13 @@ export default function Dashboard() {
                 {activeTab === 'terminal' && (
                   <TerminalPanel />
                 )}
+                {/* Kept mounted so the running page isn't reloaded on every tab switch. */}
+                <div className={activeTab === 'preview' ? 'h-full' : 'hidden'}>
+                  <PreviewPanel
+                    active={section === 'workflow' && activeTab === 'preview'}
+                    featureName={state?.activeFeatureName ?? null}
+                  />
+                </div>
               </div>
             </div>
           </div>

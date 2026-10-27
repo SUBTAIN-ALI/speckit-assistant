@@ -57,6 +57,7 @@ describe('FSExtensionRepository', () => {
     expect(ext.name).toBe('Spec Agents');
     expect(ext.enabled).toBe(false);
     expect(ext.commandCount).toBe(2);
+    expect(ext.commands).toEqual(['speckit.spec-agents.po', 'speckit.spec-agents.architecture']);
     expect(ext.hookCount).toBe(1);
     expect(ext.priority).toBe(20);
     expect(ext.description).toBe('Specification agents.');

@@ -1,6 +1,6 @@
 import React from 'react';
-import { WorkflowState, FeatureWorkflow, WorkflowPhase, PhaseState, PersonaState } from '../domain/models/types';
-import { Play, Check, RotateCcw, AlertTriangle, CheckCircle2, ChevronRight, Trash2, ShieldCheck, ChevronDown, ChevronUp, ShieldAlert, Info, X } from 'lucide-react';
+import { WorkflowState, FeatureWorkflow, WorkflowPhase, PhaseState, PersonaState, isPhaseDone } from '../domain/models/types';
+import { Play, Check, RotateCcw, AlertTriangle, CheckCircle2, ChevronRight, Trash2, ShieldCheck, ChevronDown, ChevronUp, ShieldAlert, Info, X, MonitorPlay, Zap } from 'lucide-react';
 
 type KanbanBoardProps = {
   state: WorkflowState;
@@ -14,7 +14,19 @@ type KanbanBoardProps = {
   onRerunGate?: (featureName: string | null) => void;
   onOpenReview: (featureName: string, phaseState: PhaseState) => void;
   onStopPhase?: (phase: WorkflowPhase, featureName: string | null) => void;
+  // Interactive phases (Clarify) never exit on their own: "Finish" sends them to review.
+  onFinishPhase?: (phase: WorkflowPhase, featureName: string | null) => void;
+  // Opens the running project (Preview tab) once implementation is done.
+  onPreview?: (featureName: string) => void;
+  // Re-runs a phase that stopped to ask something, with the user's answer.
+  onAnswerPhase?: (phase: WorkflowPhase, featureName: string, answer: string) => void;
+  // Specification card: approve the spec, skip to Implementation and build now.
+  onQuickBuild?: (featureName: string) => void;
 };
+
+// What "Yes, proceed" tells an agent that stopped to ask before building.
+export const PROCEED_ANSWER =
+  'Yes, proceed with the implementation now, even though some checklists are incomplete. Where the spec is unclear, follow the plan and contracts, and list those choices in your final report. Do not stop to ask again.';
 
 const PERSONA_LABELS: Record<string, string> = {
   developer: 'Developer',
@@ -41,6 +53,8 @@ const personaChipClass = (status: PersonaState['status']): string => {
       return 'text-green-500 bg-green-500/10 border-green-500/20';
     case 'failed':
       return 'text-red-500 bg-red-500/10 border-red-500/20';
+    case 'unavailable':
+      return 'text-amber-600 bg-amber-500/10 border-amber-500/20';
     default:
       return 'text-zinc-400 bg-zinc-100 dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800';
   }
@@ -79,8 +93,13 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
   onCardDrop,
   onRerunGate,
   onOpenReview,
-  onStopPhase
+  onStopPhase,
+  onFinishPhase,
+  onPreview,
+  onAnswerPhase,
+  onQuickBuild
 }) => {
+  const [answers, setAnswers] = React.useState<Record<string, string>>({});
   const [dragOverCol, setDragOverCol] = React.useState<string | null>(null);
   const [expandedGateFeature, setExpandedGateFeature] = React.useState<string | null>(null);
 
@@ -93,13 +112,17 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
     return 'passed';
   };
 
-  // The review gate stopped at a failing reviewer: the phase stays 'running'
-  // (blocked), but nothing is executing. Returns that reviewer's label.
-  const gateBlockedBy = (ps: PhaseState): string | null => {
+  // The review gate stopped at a failing reviewer, or never started because a
+  // reviewer isn't installed: the phase stays 'running' (blocked), but nothing
+  // is executing. Returns that reviewer.
+  const gateBlocker = (ps: PhaseState): PersonaState | null => {
     if (ps.phase !== 'implementation' || ps.status !== 'running' || !ps.personas) return null;
     if (ps.personas.some(p => p.status === 'running')) return null;
-    const failed = ps.personas.find(p => p.status === 'failed');
-    return failed ? PERSONA_LABELS[failed.id] ?? failed.id : null;
+    return ps.personas.find(p => p.status === 'unavailable') ?? ps.personas.find(p => p.status === 'failed') ?? null;
+  };
+  const gateBlockedBy = (ps: PhaseState): string | null => {
+    const blocker = gateBlocker(ps);
+    return blocker ? PERSONA_LABELS[blocker.id] ?? blocker.id : null;
   };
 
   const isDeveloperPassedButGateIdle = (activePhaseState: PhaseState): boolean => {
@@ -137,7 +160,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
   // Helper to determine which column a feature belongs to
   const getFeatureColumn = (feature: FeatureWorkflow): string => {
     for (const phase of feature.phases) {
-      if (phase.status !== 'approved') {
+      if (!isPhaseDone(phase.status)) {
         return phase.phase;
       }
     }
@@ -180,6 +203,12 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
         return (
           <span className="flex items-center gap-1 text-[10px] font-semibold text-green-500 bg-green-500/10 px-1.5 py-0.5 rounded border border-green-500/20">
             APPROVED
+          </span>
+        );
+      case 'skipped':
+        return (
+          <span className="flex items-center gap-1 text-[10px] font-semibold text-zinc-500 bg-zinc-500/10 px-1.5 py-0.5 rounded border border-zinc-500/20" title="Skipped by a quick build — you can still run it">
+            SKIPPED
           </span>
         );
       default:
@@ -315,7 +344,15 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                           {/* Action area based on status */}
                           {colKey !== 'completed' && (
                             <div className="flex justify-between items-center mt-3">
-                              {gateBlockedBy(activePhaseState) ? (
+                              {gateBlocker(activePhaseState)?.status === 'unavailable' ? (
+                                <span
+                                  className="flex items-center gap-1 text-[10px] font-semibold text-amber-600 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20"
+                                  title={gateBlocker(activePhaseState)?.note ?? 'A reviewer is not installed in this workspace.'}
+                                >
+                                  <AlertTriangle size={10} />
+                                  BLOCKED · {gateBlockedBy(activePhaseState)} NOT INSTALLED
+                                </span>
+                              ) : gateBlockedBy(activePhaseState) ? (
                                 <span
                                   className="flex items-center gap-1 text-[10px] font-semibold text-red-500 bg-red-500/10 px-1.5 py-0.5 rounded border border-red-500/20"
                                   title="A reviewer failed the implementation. Read its report, fix the problems, then re-run the review."
@@ -324,6 +361,9 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                                   BLOCKED · {gateBlockedBy(activePhaseState)}
                                 </span>
                               ) : getStatusBadge(activePhaseState.status, activePhaseState.stale)}
+                              {colKey === 'implementation' && activePhaseState.quickBuild && (
+                                <span className="text-[9px] font-semibold text-zinc-500 flex items-center gap-0.5" title="Built from the spec with Quick build"><Zap size={9} /> QUICK BUILD</span>
+                              )}
 
                               {progress && (
                                 <span className="text-[10px] font-mono text-zinc-400 bg-zinc-100 dark:bg-zinc-900 px-1 py-0.5 rounded">
@@ -387,9 +427,10 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                                   {/* List of personas */}
                                   <div className="space-y-2">
                                     {['developer', 'qa', 'code-review', 'security', 'tech-lead'].map(id => {
-                                      let status: 'idle' | 'running' | 'passed' | 'failed' = 'idle';
+                                      let status: PersonaState['status'] = 'idle';
                                       let reportPath: string | null = null;
                                       let label = '';
+                                      let note: string | undefined;
 
                                       if (id === 'developer') {
                                         status = getDeveloperStatus(activePhaseState);
@@ -398,7 +439,8 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                                       } else {
                                         const personaState = activePhaseState.personas?.find(p => p.id === id) || { id, status: 'idle', reportPath: null };
                                         status = personaState.status;
-                                        reportPath = personaState.reportPath;
+                                        reportPath = personaState.reportPath ?? null;
+                                        note = 'note' in personaState ? personaState.note : undefined;
                                         label = id === 'qa' ? 'QA Agent' : id === 'code-review' ? 'Code Reviewer' : id === 'security' ? 'Security Auditor' : 'Tech Lead';
                                       }
 
@@ -410,6 +452,8 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                                               ? 'bg-green-500/5 border-green-500/20 dark:border-green-500/10'
                                               : status === 'failed'
                                               ? 'bg-red-500/5 border-red-500/20 dark:border-red-500/10'
+                                              : status === 'unavailable'
+                                              ? 'bg-amber-500/5 border-amber-500/20 dark:border-amber-500/10'
                                               : status === 'running'
                                               ? 'bg-blue-500/5 border-blue-500/20 dark:border-blue-500/10 animate-pulse'
                                               : 'bg-white dark:bg-black border-zinc-200 dark:border-zinc-850'
@@ -426,6 +470,8 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                                                     ? 'bg-green-500'
                                                     : status === 'failed'
                                                     ? 'bg-red-500'
+                                                    : status === 'unavailable'
+                                                    ? 'bg-amber-500'
                                                     : status === 'running'
                                                     ? 'bg-blue-500 animate-ping'
                                                     : 'bg-zinc-300 dark:bg-zinc-700'
@@ -434,6 +480,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                                               <p className="text-[9px] text-zinc-400 dark:text-zinc-500 mt-0.5 leading-normal">
                                                 {PERSONA_DESCRIPTIONS[id]}
                                               </p>
+                                              {note && <p className={`text-[9px] mt-0.5 leading-normal ${status === 'unavailable' ? 'text-amber-700 dark:text-amber-400' : 'text-red-600 dark:text-red-400'}`}>{note}</p>}
                                             </div>
 
                                             <div className="flex items-center gap-1 shrink-0">
@@ -449,7 +496,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                                               {status === 'running' && (
                                                 <button
                                                   onClick={() => onStopPhase?.('implementation', feature.name)}
-                                                  className="text-[9px] font-semibold text-white bg-red-650 hover:bg-red-700 px-1.5 py-0.5 rounded transition flex items-center gap-1 shrink-0"
+                                                  className="text-[9px] font-semibold text-white bg-red-600 hover:bg-red-700 px-1.5 py-0.5 rounded transition flex items-center gap-1 shrink-0"
                                                   title="Stop execution of this agent persona"
                                                 >
                                                   <X size={8} /> Stop
@@ -464,7 +511,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                                                   Report
                                                 </button>
                                               ) : (
-                                                id !== 'developer' && status !== 'running' && <span className="text-[9px] text-zinc-400 italic shrink-0">No report</span>
+                                                id !== 'developer' && status !== 'running' && status !== 'unavailable' && <span className="text-[9px] text-zinc-400 italic shrink-0">No report</span>
                                               )}
                                             </div>
                                           </div>
@@ -488,6 +535,42 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                           )}
                         </div>
 
+                        {/* The last run stopped and needs the user (e.g. Implement asked a question) */}
+                        {activePhaseState.attention && (
+                          <div className="mt-3 p-2 rounded-md border border-amber-500/30 bg-amber-500/10 text-[10px] leading-normal space-y-1.5" onClick={e => e.stopPropagation()}>
+                            <p className="font-semibold text-amber-800 dark:text-amber-300 flex items-start gap-1"><AlertTriangle size={11} className="mt-px shrink-0" /> {activePhaseState.attention.message}</p>
+                            {activePhaseState.attention.question && (
+                              <p className="text-zinc-700 dark:text-zinc-300">The agent asked: <em>{activePhaseState.attention.question}</em></p>
+                            )}
+                            {onAnswerPhase && (
+                              <div className="flex flex-wrap items-center gap-1">
+                                {colKey === 'implementation' && (
+                                  <button
+                                    onClick={() => onAnswerPhase(colKey, feature.name, PROCEED_ANSWER)}
+                                    className="px-2 py-0.5 rounded bg-black dark:bg-white text-white dark:text-black font-semibold"
+                                  >
+                                    Yes, proceed
+                                  </button>
+                                )}
+                                <input
+                                  value={answers[feature.name] ?? ''}
+                                  onChange={e => setAnswers(a => ({ ...a, [feature.name]: e.target.value }))}
+                                  placeholder="Or type your answer…"
+                                  aria-label="Your answer to the agent"
+                                  className="flex-1 min-w-[90px] px-1.5 py-0.5 rounded border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950"
+                                />
+                                <button
+                                  onClick={() => { const a = (answers[feature.name] ?? '').trim(); if (a && colKey !== 'completed') { onAnswerPhase(colKey, feature.name, a); setAnswers(x => ({ ...x, [feature.name]: '' })); } }}
+                                  disabled={!(answers[feature.name] ?? '').trim()}
+                                  className="px-2 py-0.5 rounded border border-zinc-200 dark:border-zinc-800 font-semibold disabled:opacity-40"
+                                >
+                                  Send
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
                         {/* Interactive Phase Control buttons on cards */}
                         <div className="mt-4 pt-3 border-t border-zinc-100 dark:border-zinc-900 flex justify-end items-center gap-1.5">
                           <button
@@ -500,6 +583,19 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                           >
                             Open File
                           </button>
+
+                          {onPreview && (colKey === 'completed' || (colKey === 'implementation' && ['awaiting_review', 'approved'].includes(activePhaseState.status))) && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onPreview(feature.name);
+                              }}
+                              title="Run the project and see the changes"
+                              className="flex items-center gap-0.5 p-1 px-2 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900 text-[10px] font-semibold rounded transition"
+                            >
+                              <MonitorPlay size={9} /> Preview
+                            </button>
+                          )}
 
                           {colKey !== 'completed' ? (
                             activePhaseState.status !== 'approved' ? (
@@ -516,13 +612,25 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                                     <ShieldCheck size={8} /> Re-run review
                                   </button>
                                 )}
+                                {colKey === 'clarification' && activePhaseState.status === 'running' && onFinishPhase && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onFinishPhase(colKey, feature.name);
+                                    }}
+                                    title="Clarify waits for more input after it finishes. Close the session and review spec.md."
+                                    className="flex items-center gap-0.5 p-1 px-2 bg-black dark:bg-white text-white dark:text-black hover:opacity-90 text-[10px] font-semibold rounded transition"
+                                  >
+                                    <Check size={8} /> Finish
+                                  </button>
+                                )}
                                 {activePhaseState.status === 'running' && !gateBlockedBy(activePhaseState) ? (
                                   <button
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       onStopPhase?.(colKey, feature.name);
                                     }}
-                                    className="flex items-center gap-0.5 p-1 px-2 bg-red-650 hover:bg-red-700 text-white text-[10px] font-semibold rounded transition"
+                                    className="flex items-center gap-0.5 p-1 px-2 bg-red-600 hover:bg-red-700 text-white text-[10px] font-semibold rounded transition"
                                   >
                                     <X size={8} /> Stop
                                   </button>
@@ -551,6 +659,19 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                                      <ShieldCheck size={8} /> Review
                                    </button>
                                  )}
+
+                                {colKey === 'specification' && activePhaseState.status === 'awaiting_review' && onQuickBuild && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onQuickBuild(feature.name);
+                                    }}
+                                    title="Approve this spec and build it now. Clarification to Tasks are skipped; your agent works out the plan and tasks from the spec and the existing code, and records its assumptions in tasks.md."
+                                    className="flex items-center gap-0.5 p-1 px-2 bg-black dark:bg-white text-white dark:text-black hover:opacity-90 text-[10px] font-semibold rounded transition"
+                                  >
+                                    <Zap size={8} fill="currentColor" /> Quick build
+                                  </button>
+                                )}
 
                                 {activePhaseState.status === 'awaiting_review' && (
                                   <button

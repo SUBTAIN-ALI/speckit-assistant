@@ -631,6 +631,8 @@ export const HumanReviewModal: React.FC<HumanReviewModalProps> = ({
                     statusIcon = <CheckCircle2 size={13} className="text-green-500 mt-0.5 shrink-0" />;
                   } else if (persona.status === 'failed') {
                     statusIcon = <ShieldAlert size={13} className="text-red-500 mt-0.5 shrink-0" />;
+                  } else if (persona.status === 'unavailable') {
+                    statusIcon = <AlertTriangle size={13} className="text-amber-500 mt-0.5 shrink-0" />;
                   } else if (persona.status === 'running') {
                     statusIcon = <Clock size={13} className="text-blue-400 animate-pulse mt-0.5 shrink-0" />;
                   }
@@ -644,10 +646,11 @@ export const HumanReviewModal: React.FC<HumanReviewModalProps> = ({
                           <span className={`text-[8px] font-bold px-1 rounded uppercase tracking-wider ${
                             persona.status === 'passed' ? 'bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20' :
                             persona.status === 'failed' ? 'bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20' :
+                            persona.status === 'unavailable' ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20' :
                             persona.status === 'running' ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 animate-pulse' :
                             'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700'
                           }`}>
-                            {persona.status}
+                            {persona.status === 'unavailable' ? 'not installed' : persona.status}
                           </span>
                         </div>
                         <p className="text-[9px] text-zinc-500">{persona.desc}</p>

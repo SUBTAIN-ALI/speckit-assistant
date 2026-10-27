@@ -19,7 +19,7 @@ function make(opts: { agents?: AgentsFile; servers?: McpServer[]; installed?: st
   const runner = new MeetingAgentRunner(
     { getAgents: async () => opts.agents ?? agentsFile(), saveAgents: async () => {} },
     { getServers: async () => ({ servers: opts.servers ?? [ZOOM_MCP_PRESET] }), saveServers: async () => {}, applyToAgent: async () => ({} as never) },
-    { listInstalled: async () => (opts.installed ?? ['meetings']).map(id => ({ id, name: id, version: '1', enabled: true, commandCount: 2, hookCount: 0 })) },
+    { listInstalled: async () => (opts.installed ?? ['meetings']).map(id => ({ id, name: id, version: '1', enabled: true, commandCount: 2, commands: [], hookCount: 0 })) },
     {
       runCommand: async (_ws, cmd, cfg, onData, onCost) => {
         calls.push({ cmd, agentType: cfg.agentType });

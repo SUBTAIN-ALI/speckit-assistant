@@ -7,6 +7,7 @@ export type InstalledExtension = {
   enabled: boolean;
   source?: string;
   commandCount: number;
+  commands: string[]; // command names from extension.yml, e.g. "speckit.personas.qa"
   hookCount: number;
   priority?: number;
   description?: string;

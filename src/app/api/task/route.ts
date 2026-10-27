@@ -4,12 +4,16 @@ import { getWorkspacePath } from '../../../adapters/primary/api/utils';
 
 export async function POST(req: Request) {
   try {
-    const { featureName, lineIndex, checked } = await req.json();
-    if (!featureName || lineIndex === undefined || checked === undefined) {
+    // { filePath, lineIndex, checked }: the file being viewed (checklists too);
+    // { featureName, lineIndex, checked }: that feature's tasks.md (older clients).
+    const { filePath, featureName, lineIndex, checked } = await req.json();
+    if ((!filePath && !featureName) || typeof lineIndex !== 'number' || typeof checked !== 'boolean') {
       return NextResponse.json({ error: 'Missing parameters' }, { status: 400 });
     }
     const workspacePath = getWorkspacePath();
-    const state = await workflowService.toggleTask(workspacePath, featureName, lineIndex, checked);
+    const state = typeof filePath === 'string'
+      ? await workflowService.toggleCheckbox(workspacePath, filePath, lineIndex, checked)
+      : await workflowService.toggleTask(workspacePath, featureName, lineIndex, checked);
     return NextResponse.json(state);
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });

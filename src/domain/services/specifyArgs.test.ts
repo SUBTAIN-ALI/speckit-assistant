@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildSpecifyArgs } from './specifyArgs';
+import { buildSpecifyArgs, buildInitArgs, INTEGRATION_FOR_AGENT } from './specifyArgs';
 
 describe('buildSpecifyArgs', () => {
   it('install-bundled uses --dev --force on the local path', () => {
@@ -33,5 +33,21 @@ describe('buildSpecifyArgs', () => {
     expect(buildSpecifyArgs({ action: 'enable', id: 'p' })).toEqual(['extension', 'enable', 'p']);
     expect(buildSpecifyArgs({ action: 'disable', id: 'p' })).toEqual(['extension', 'disable', 'p']);
     expect(buildSpecifyArgs({ action: 'set-priority', id: 'p', priority: 20 })).toEqual(['extension', 'set-priority', 'p', '20']);
+  });
+});
+
+describe('buildInitArgs', () => {
+  it('initializes the current folder without ever prompting', () => {
+    expect(buildInitArgs('claude')).toEqual(['init', '--here', '--force', '--non-interactive', '--integration', 'claude']);
+  });
+
+  it('maps each agent type to its Spec Kit integration', () => {
+    expect(INTEGRATION_FOR_AGENT).toMatchObject({ claude: 'claude', openai: 'codex', gemini: 'gemini', copilot: 'copilot' });
+  });
+
+  it('rejects anything that is not a plain integration name', () => {
+    expect(() => buildInitArgs('claude --force')).toThrow();
+    expect(() => buildInitArgs('../x')).toThrow();
+    expect(() => buildInitArgs('')).toThrow();
   });
 });

@@ -1,6 +1,8 @@
 // Pure builder that maps an extension management action to the `specify` argv
 // (everything after the binary name). Kept side-effect free for testability.
 
+import { AgentType } from '../models/types';
+
 export type SpecifyActionInput =
   | { action: 'install-bundled'; path: string; priority?: number }
   | { action: 'install-community'; id: string; fromUrl?: string; priority?: number }
@@ -51,4 +53,21 @@ export function buildSpecifyArgs(input: SpecifyActionInput): string[] {
       throw new Error(`Unknown action: ${JSON.stringify(_exhaustive)}`);
     }
   }
+}
+
+// The Spec Kit integration for each agent type this app runs (`--integration`).
+export const INTEGRATION_FOR_AGENT: Record<AgentType, string> = {
+  claude: 'claude',
+  gemini: 'gemini',
+  copilot: 'copilot',
+  openai: 'codex',
+  custom: 'claude',
+};
+
+// `specify init` in the current folder, never prompting: --force merges into a
+// non-empty folder, --non-interactive keeps a run without a terminal from hanging.
+// Spec Kit scaffolds from files bundled with the CLI (no download).
+export function buildInitArgs(integration: string): string[] {
+  if (!/^[a-z][a-z0-9-]{1,40}$/.test(integration)) throw new Error(`Invalid integration: ${integration}`);
+  return ['init', '--here', '--force', '--non-interactive', '--integration', integration];
 }

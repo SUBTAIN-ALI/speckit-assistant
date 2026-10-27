@@ -207,6 +207,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
             // Dot classes
             let dotColor = 'bg-zinc-300 dark:bg-zinc-700';
             if (status === 'approved') dotColor = 'bg-emerald-500';
+            if (status === 'skipped') dotColor = 'bg-zinc-400 dark:bg-zinc-500';
             if (status === 'awaiting_review') dotColor = 'bg-amber-500';
             if (status === 'running') dotColor = 'bg-blue-500 animate-pulse';
 

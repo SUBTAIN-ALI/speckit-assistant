@@ -29,6 +29,7 @@ export class FSExtensionRepository implements ExtensionRepositoryPort {
         enabled: meta.enabled !== false,
         source: meta.source,
         commandCount: manifest?.commandCount ?? 0,
+        commands: manifest?.commands ?? [],
         hookCount: manifest?.hookCount ?? 0,
         priority: typeof meta.priority === 'number' ? meta.priority : undefined,
         description: manifest?.description,
@@ -37,20 +38,23 @@ export class FSExtensionRepository implements ExtensionRepositoryPort {
     return result.sort((a, b) => a.id.localeCompare(b.id));
   }
 
-  private readManifest(manifestPath: string): { name?: string; version?: string; description?: string; commandCount: number; hookCount: number } | null {
+  private readManifest(manifestPath: string): { name?: string; version?: string; description?: string; commandCount: number; commands: string[]; hookCount: number } | null {
     if (!fs.existsSync(manifestPath)) return null;
     try {
       const data = yaml.load(fs.readFileSync(manifestPath, 'utf-8')) as any;
       const ext = data?.extension || {};
       const commands = data?.provides?.commands;
       const commandCount = Array.isArray(commands) ? commands.length : 0;
+      const names = Array.isArray(commands)
+        ? commands.map((c: any) => c?.name).filter((n: unknown): n is string => typeof n === 'string')
+        : [];
       let hookCount = 0;
       if (data?.hooks && typeof data.hooks === 'object') {
         for (const v of Object.values(data.hooks)) {
           hookCount += Array.isArray(v) ? v.length : v ? 1 : 0;
         }
       }
-      return { name: ext.name, version: ext.version, description: ext.description, commandCount, hookCount };
+      return { name: ext.name, version: ext.version, description: ext.description, commandCount, commands: names, hookCount };
     } catch {
       return null;
     }

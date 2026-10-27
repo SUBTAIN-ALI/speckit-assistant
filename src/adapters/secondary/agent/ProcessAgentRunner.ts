@@ -49,9 +49,12 @@ export function speckitInvocation(workspacePath: string, slash: string): string 
 }
 
 export class ProcessAgentRunner implements AgentRunnerPort {
-  private activeProcesses = new Map<string, pty.IPty>();
-
-  constructor(private envProvider?: AgentEnvProvider) {}
+  // activeProcesses: the live sessions. Pass a shared map to keep them across
+  // a fresh runner (e.g. `next dev` reloading this module with new code).
+  constructor(
+    private envProvider?: AgentEnvProvider,
+    private activeProcesses = new Map<string, pty.IPty>()
+  ) {}
 
   private phaseKey(featureName: string | null, phase: WorkflowPhase): string {
     return `${featureName || "global"}-${phase}`;
@@ -137,10 +140,12 @@ export class ProcessAgentRunner implements AgentRunnerPort {
     userPrompt?: string,
     onData?: (text: string) => void,
     onCost?: (cost: CostMetadata) => void,
+    options?: { instruction?: string },
   ): Promise<number> {
     const specArg =
       phase !== "constitution" && featureName ? `specs/${featureName}` : null;
-    const slashCmd = `${speckitInvocation(workspacePath, PHASE_COMMANDS[phase])}${specArg ? ` ${specArg}` : ""}`;
+    const slashCmd = options?.instruction?.trim()
+      || `${speckitInvocation(workspacePath, PHASE_COMMANDS[phase])}${specArg ? ` ${specArg}` : ""}`;
 
     const context = userPrompt?.trim();
     const fullPrompt = context ? `${context}\n\n${slashCmd}` : slashCmd;
@@ -217,15 +222,18 @@ export class ProcessAgentRunner implements AgentRunnerPort {
     onData?: (text: string) => void,
     onCost?: (cost: CostMetadata) => void,
   ): Promise<number> {
-    const slash = speckitInvocation(workspacePath, command.command.startsWith("/") ? command.command : `/${command.command}`);
-    const slashCmd = command.args ? `${slash} ${command.args}` : slash;
     const context = command.context?.trim();
+    // No slash command: a plain instruction (e.g. preparing the preview).
+    const slash = command.command
+      ? speckitInvocation(workspacePath, command.command.startsWith("/") ? command.command : `/${command.command}`)
+      : "";
+    const slashCmd = slash && command.args ? `${slash} ${command.args}` : slash;
     return this.spawnAgent({
       workspacePath,
       procKey: command.key,
-      doneTag: `command:${slash}`,
+      doneTag: `command:${slash || command.key}`,
       agentConfig,
-      fullPrompt: context ? `${context}\n\n${slashCmd}` : slashCmd,
+      fullPrompt: [context, slashCmd].filter(Boolean).join("\n\n"),
       onData,
       onCost,
       restricted: command.restricted,

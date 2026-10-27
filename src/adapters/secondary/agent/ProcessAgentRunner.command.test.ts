@@ -140,6 +140,14 @@ describe('Spec Kit compatibility', () => {
     (loadPty().spawn as any).mockClear();
     await finish(runner.runCommand(ws, { key: 'k', command: '/speckit.meetings.group', args: 'd', restricted: { allowedTools: ['Read'], mcpServers: {} } }, { agentType: 'claude' }));
     expect((loadPty().spawn as any).mock.calls.at(-1)[1][2]).toContain("'--' '/speckit-meetings-group d'");
+
+    // A quick build without tasks.md sends its instruction instead of /speckit-implement, still scoped to the feature.
+    (loadPty().spawn as any).mockClear();
+    await finish(runner.runPhase(ws, 'implementation', '002-promo-codes', { agentType: 'claude' }, undefined, undefined, undefined, { instruction: 'Quick build of the feature in specs/002-promo-codes/' }));
+    const qb = (loadPty().spawn as any).mock.calls.at(-1);
+    expect(qb[1][2]).toContain('Quick build of the feature');
+    expect(qb[1][2]).not.toContain('/speckit-implement');
+    expect(qb[2].env).toMatchObject({ SPECIFY_FEATURE_DIRECTORY: 'specs/002-promo-codes' });
   });
 });
 
@@ -184,5 +192,23 @@ describe('print mode vs interactive', () => {
     expect(text).toContain('✓ Done in 80s · 5 turns · $0.420');
     expect(text).not.toContain('"type"');
     expect(cost).toEqual({ inputTokens: 1000, outputTokens: 50, totalTokens: 1050, costUSD: 0.42, model: 'claude-opus-5-5', durationMs: 80000, source: 'parsed' });
+  });
+});
+
+describe('ProcessAgentRunner sessions', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('a fresh runner sharing the sessions map can stop a run the old one started', async () => {
+    const sessions = new Map();
+    const pty = loadPty().spawn('dummy', []);
+    (loadPty().spawn as any).mockClear();
+    const run = new ProcessAgentRunner(undefined, sessions).runPhase('/ws', 'implementation', 'auth', { agentType: 'claude' });
+    await vi.waitFor(() => expect(loadPty().spawn).toHaveBeenCalled());
+
+    // e.g. `next dev` reloaded the module with new code
+    expect(await new ProcessAgentRunner(undefined, sessions).stop('implementation', 'auth')).toBe(true);
+    expect(pty.kill).toHaveBeenCalled();
+    (pty as any)._exitCallback({ exitCode: 0 });
+    await run;
   });
 });

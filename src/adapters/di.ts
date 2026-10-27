@@ -20,31 +20,35 @@ import { MeetingImportService } from '../domain/services/MeetingImportService';
 import { FeatureCreationService } from '../domain/services/FeatureCreationService';
 import { MeetingAgentRunner } from '../domain/services/MeetingAgentRunner';
 import { ZOOM_TOKEN_ENV } from '../domain/models/mcp';
+import { ProcessPreviewRunner } from './secondary/preview/ProcessPreviewRunner';
+import { PreviewService } from '../domain/services/PreviewService';
 
 const workspaceRepo = new FSWorkspaceRepository();
 const credentialStore = new FSCredentialStore();
 export const zoomAuth = new ZoomAuth(credentialStore);
 // Every agent run gets a fresh Zoom access token (when Zoom is connected), so an
 // MCP server header like "Bearer ${ZOOM_MEETINGS_MCP_ACCESS_TOKEN}" just works.
-// One runner per server process. It holds the live agent sessions (to stop
-// them, type into them, close them when a card moves on); in `next dev` route
-// modules get reloaded, and a fresh runner would lose track of those sessions.
-const globalForAgents = globalThis as unknown as { speckitAgentRunner?: ProcessAgentRunner };
-const agentRunner = globalForAgents.speckitAgentRunner ??= new ProcessAgentRunner(async (): Promise<Record<string, string>> => {
+// The live agent sessions (to stop them, type into them, close them when a
+// card moves on) are shared by the whole server process. In `next dev` this
+// module gets reloaded: keep the sessions, but build the runner from the
+// current code — caching the runner itself kept running stale code after edits.
+const globalForAgents = globalThis as unknown as { speckitAgentSessions?: Map<string, any> };
+const agentSessions = globalForAgents.speckitAgentSessions ??= new Map();
+const agentRunner = new ProcessAgentRunner(async (): Promise<Record<string, string>> => {
   try {
     return { [ZOOM_TOKEN_ENV]: await zoomAuth.getAccessToken() };
   } catch {
     return {}; // Zoom not connected
   }
-});
+}, agentSessions);
 
 export const executionHistory = new FSExecutionHistory();
-export const workflowService = new WorkflowService(workspaceRepo, agentRunner, executionHistory);
+export const extensionRepository = new FSExtensionRepository();
+export const workflowService = new WorkflowService(workspaceRepo, agentRunner, executionHistory, extensionRepository);
 export const agentRepository = new FSAgentRepository();
 export const mcpConfig = new FSMcpConfig();
 export const specAgentRepository = new FSSpecAgentRepository();
 export const devopsAgentRepository = new FSDevOpsAgentRepository();
-export const extensionRepository = new FSExtensionRepository();
 export const specifyCli = new ProcessSpecifyRunner();
 
 // Meeting → requirements (user-provided AI keys + Zoom MCP)
@@ -70,3 +74,9 @@ export const meetingImportService = new MeetingImportService(
 export const featureCreationService = new FeatureCreationService(
   workspaceRepo, requirementsService, integrationsService, workflowService, meetingAgentRunner, executionHistory
 );
+
+// Live preview: the agent works out how to run the project, this app runs it.
+// Like the agent sessions, the running dev servers outlive a module reload; the runner is rebuilt from current code.
+const globalForPreview = globalThis as unknown as { speckitPreviewServers?: Map<string, any> };
+const previewRunner = new ProcessPreviewRunner(undefined, undefined, globalForPreview.speckitPreviewServers ??= new Map());
+export const previewService = new PreviewService(workspaceRepo, previewRunner, agentRunner, agentRepository, executionHistory);

@@ -22,6 +22,7 @@ export class MemoryWorkspace implements WorkspaceRepositoryPort {
   async getWorkflowState(): Promise<WorkflowState> { throw new Error('not used'); }
   async saveWorkflowState() { throw new Error('not used'); }
   async toggleTask(): Promise<WorkflowState> { throw new Error('not used'); }
+  async toggleCheckbox(): Promise<void> { throw new Error('not used'); }
   async createFeature(): Promise<WorkflowState> { throw new Error('not used'); }
   async deleteFeature(): Promise<WorkflowState> { throw new Error('not used'); }
 }

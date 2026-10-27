@@ -9,7 +9,9 @@ import { AUDIO_EXTENSIONS, DOCUMENT_EXTENSIONS, MAX_DOCUMENT_BYTES, documentTooL
 type Props = {
   isOpen: boolean;
   zoomConnected: boolean;
-  llmLabel: string | null; // e.g. "OpenAI · gpt-4.1-mini"; null when no key is configured
+  llmLabel: string | null; // e.g. "OpenAI · gpt-4.1-mini"; null when not ready
+  // Why importing can't start yet, and where to fix it (shown when llmLabel is null).
+  blocker?: { message: string; action?: { label: string; onClick: () => void; busy?: boolean } } | null;
   onClose: () => void;
   onImported: (setId: string, doc: RequirementsDoc) => void;
   onOpenSettings: () => void;
@@ -18,7 +20,7 @@ type Props = {
 type Outcome = { status: ImportStatus; message: string; setId?: string; doc?: RequirementsDoc; added?: number; cost?: { costUSD?: number; totalTokens?: number } };
 
 // Each import creates a new requirement list (one per meeting).
-export const MeetingImportModal: React.FC<Props> = ({ isOpen, zoomConnected, llmLabel, onClose, onImported, onOpenSettings }) => {
+export const MeetingImportModal: React.FC<Props> = ({ isOpen, zoomConnected, llmLabel, blocker, onClose, onImported, onOpenSettings }) => {
   const [tab, setTab] = useState<'zoom' | 'file'>(zoomConnected ? 'zoom' : 'file');
   const [link, setLink] = useState('');
   const [title, setTitle] = useState('');
@@ -143,7 +145,9 @@ export const MeetingImportModal: React.FC<Props> = ({ isOpen, zoomConnected, llm
         <div className="px-5 py-4 space-y-4">
           {!llmLabel && (
             <p className="text-[11px] text-amber-700 dark:text-amber-400 bg-amber-500/10 rounded-lg p-3">
-              Add an AI provider key first. <button onClick={onOpenSettings} className="underline font-semibold">Open settings</button>
+              {blocker
+                ? <>{blocker.message}{blocker.action && <> <button onClick={blocker.action.onClick} disabled={blocker.action.busy} className="underline font-semibold disabled:opacity-60 disabled:no-underline">{blocker.action.label}</button></>}</>
+                : <>Add an AI provider key first. <button onClick={onOpenSettings} className="underline font-semibold">Open settings</button></>}
             </p>
           )}
 

@@ -5,7 +5,7 @@ import { DevOpsAgent } from '../../models/devopsAgents';
 // extension command like /speckit.meetings.import).
 export type AgentCommand = {
   key: string; // identifies the process (for stop / stdin)
-  command: string; // "/speckit.meetings.import"
+  command: string; // "/speckit.meetings.import"; "" sends only `context` as the prompt
   args?: string; // becomes $ARGUMENTS
   context?: string; // extra instructions placed before the command
   // Run unattended with only these tools and MCP servers (enforced for Claude:
@@ -32,7 +32,10 @@ export interface AgentRunnerPort {
     userPrompt?: string,
     onData?: (text: string) => void,
     // Invoked once at process exit with the captured cost/usage of the run.
-    onCost?: (cost: CostMetadata) => void
+    onCost?: (cost: CostMetadata) => void,
+    // instruction: send this instead of the phase's slash command (e.g. a quick
+    // build when the feature has no tasks.md for /speckit.implement to follow).
+    options?: { instruction?: string }
   ): Promise<number>;
   // Runs a single review-gate persona as its own tracked CLI process.
   runPersona(

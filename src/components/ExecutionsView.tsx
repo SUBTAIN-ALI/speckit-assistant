@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import {
   Activity, Rocket, Radar, Wrench, Loader2, CheckCircle2, XCircle,
-  Layers, ShieldCheck, X, FileText, List, Share2, Maximize2, Minimize2, Video,
+  Layers, ShieldCheck, X, FileText, List, Share2, Maximize2, Minimize2, Video, MonitorPlay,
 } from 'lucide-react';
 import { WorkflowState } from '../domain/models/types';
 import { ExecutionRecord, ExecutionKind, ExecutionStatus } from '../domain/models/executions';
@@ -41,6 +41,7 @@ const kindMeta: Record<ExecutionKind, { label: string; icon: React.ReactNode }> 
   persona: { label: 'Persona', icon: <ShieldCheck size={12} /> },
   devops: { label: 'DevOps', icon: <Rocket size={12} /> },
   meeting: { label: 'Meeting', icon: <Video size={12} /> },
+  preview: { label: 'Preview', icon: <MonitorPlay size={12} /> },
 };
 
 const devopsIcon = (category: DevOpsCategory) => {

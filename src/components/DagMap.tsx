@@ -10,7 +10,7 @@ import {
   Edge,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { WorkflowState, FeatureWorkflow, WorkflowPhase, PhaseStatus } from '../domain/models/types';
+import { isPhaseDone, WorkflowState, FeatureWorkflow, WorkflowPhase, PhaseStatus } from '../domain/models/types';
 import { AlertTriangle, Play, Check, FileText } from 'lucide-react';
 
 // Status styling mapping
@@ -19,6 +19,7 @@ const STATUS_COLOR: Record<PhaseStatus, string> = {
   running: '#3b82f6',       // blue-500
   awaiting_review: '#f59e0b', // amber-500
   approved: '#10b981',      // emerald-500
+  skipped: '#a1a1aa',       // zinc-400
 };
 
 const STATUS_LABEL: Record<PhaseStatus, string> = {
@@ -26,6 +27,7 @@ const STATUS_LABEL: Record<PhaseStatus, string> = {
   running: 'Running',
   awaiting_review: 'Review',
   approved: 'Approved',
+  skipped: 'Skipped',
 };
 
 const PHASE_LABELS: Record<WorkflowPhase, string> = {
@@ -244,7 +246,7 @@ export const DagMap: React.FC<DagMapProps> = ({
     const constitutionApproved = state.constitutionPhase.status === 'approved';
     const activePhase = !constitutionApproved
       ? state.constitutionPhase
-      : activeFeature?.phases.find((p) => p.status !== 'approved') ?? null;
+      : activeFeature?.phases.find((p) => !isPhaseDone(p.status)) ?? null;
 
     // 1. Add Constitution Node
     nodesList.push({

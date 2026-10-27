@@ -2,6 +2,7 @@ import { WorkflowUseCases } from '../ports/in/WorkflowUseCases';
 import { WorkspaceRepositoryPort } from '../ports/out/WorkspaceRepositoryPort';
 import { AgentRunnerPort } from '../ports/out/AgentRunnerPort';
 import { ExecutionHistoryPort } from '../ports/out/ExecutionHistoryPort';
+import { ExtensionRepositoryPort } from '../ports/out/ExtensionRepositoryPort';
 import {
   WorkflowState,
   WorkflowPhase,
@@ -12,10 +13,13 @@ import {
   PersonaId,
   PersonaRunStatus,
   CostMetadata,
+  isPhaseDone,
 } from '../models/types';
 import { ExecutionStartInput, ExecutionStatus } from '../models/executions';
 import { DevOpsAgent } from '../models/devopsAgents';
 import { orderPersonas, personaReportPath } from '../models/personas';
+import { BUNDLED_EXTENSIONS, InstalledExtension } from '../models/extensions';
+import { quickBuildContext, quickBuildInstruction } from './implementPrompt';
 
 const FEATURE_PHASES: WorkflowPhase[] = [
   'specification',
@@ -32,7 +36,10 @@ export class WorkflowService implements WorkflowUseCases {
   constructor(
     private workspaceRepo: WorkspaceRepositoryPort,
     private agentRunner: AgentRunnerPort,
-    private executionHistory: ExecutionHistoryPort
+    private executionHistory: ExecutionHistoryPort,
+    // Lets the review gate check its personas' commands are installed before
+    // spending a run on them. Without it, the gate doesn't check.
+    private extensions?: ExtensionRepositoryPort
   ) {}
 
   // Wraps an agent run with execution-history tracking: records a 'running' entry,
@@ -98,21 +105,32 @@ export class WorkflowService implements WorkflowUseCases {
     agentConfig: AgentConfig,
     userPrompt?: string,
     onData?: (text: string) => void,
-    personas?: PersonaConfig[]
+    personas?: PersonaConfig[],
+    // instruction: replaces the phase's slash command (quick build without tasks.md).
+    runOptions?: { instruction?: string }
   ): Promise<WorkflowState> {
     const state = await this.workspaceRepo.getWorkflowState(workspacePath);
     const targetFeature = featureName || state.activeFeatureName;
 
     // Set status to running
     this.setPhaseStatus(state, phase, targetFeature, 'running');
+    const startingPhase = this.findPhase(state, phase, targetFeature);
+    if (startingPhase) delete startingPhase.attention;
     await this.workspaceRepo.saveWorkflowState(workspacePath, state);
+    const tasksBefore = taskProgress(state, targetFeature);
+    // The run's last words, to show a question it stopped on.
+    let tail = '';
+    const capture = (text: string) => {
+      tail = (tail + text).slice(-8000);
+      onData?.(text);
+    };
 
     try {
       const { exitCode, cost: runCost } = await this.recordRun(
         workspacePath,
         { kind: 'phase', feature: targetFeature, phase, label: phase },
-        onData,
-        (d, c) => this.agentRunner.runPhase(workspacePath, phase, targetFeature, agentConfig, userPrompt, d, c)
+        capture,
+        (d, c) => this.agentRunner.runPhase(workspacePath, phase, targetFeature, agentConfig, userPrompt, d, c, runOptions)
       );
 
       // Re-read state in case files changed on disk during run
@@ -132,6 +150,24 @@ export class WorkflowService implements WorkflowUseCases {
         this.setPhaseStatus(freshState, phase, targetFeature, 'idle');
         await this.workspaceRepo.saveWorkflowState(workspacePath, freshState);
         return freshState;
+      }
+
+      // Implement can end cleanly without building anything — it stopped to ask
+      // something (e.g. "proceed although a checklist is incomplete?") that a
+      // non-interactive run can't answer, or Spec Kit's prerequisites (plan.md,
+      // tasks.md) are missing. Progress on tasks.md during this run is the
+      // evidence that it built something; without it, don't call it done.
+      if (phase === 'implementation' && runPhaseState) {
+        const message = implementationShortfall(tasksBefore, taskProgress(freshState, targetFeature), targetFeature, !!runOptions?.instruction);
+        if (message) {
+          runPhaseState.status = 'idle';
+          runPhaseState.attention = {
+            message,
+            ...(lastQuestion(tail) ? { question: lastQuestion(tail) } : {}),
+          };
+          await this.workspaceRepo.saveWorkflowState(workspacePath, freshState);
+          return freshState;
+        }
       }
 
       // Implementation: if a review gate is configured, the personas govern the
@@ -183,6 +219,23 @@ export class WorkflowService implements WorkflowUseCases {
       status: 'idle' as PersonaRunStatus,
       reportPath: personaReportPath(featureName, p.id),
     }));
+
+    // A persona whose command isn't installed can't review anything: the agent
+    // improvises instead, records no verdict, and that reads as a rejection.
+    // Block the gate as a setup problem before running anyone.
+    const missing = await this.missingPersonaCommands(workspacePath, enabled);
+    if (missing.size > 0) {
+      for (const ps of implPhase.personas) {
+        const note = missing.get(ps.id);
+        if (!note) continue;
+        ps.status = 'unavailable';
+        ps.reportPath = null;
+        ps.note = note;
+        onData?.(`\r\n\x1b[33m⚠ ${note}\x1b[0m\r\n`);
+      }
+      await this.workspaceRepo.saveWorkflowState(workspacePath, state);
+      return state;
+    }
     await this.workspaceRepo.saveWorkflowState(workspacePath, state);
 
     for (const persona of enabled) {
@@ -192,16 +245,20 @@ export class WorkflowService implements WorkflowUseCases {
 
       onData?.(`\r\n\x1b[36m=== Persona: ${persona.label} (${persona.command}) ===\x1b[0m\r\n`);
 
+      let output = '';
+      let found: PersonaVerdict | undefined;
       const { cost: personaCost, status } = await this.recordRun(
         workspacePath,
         { kind: 'persona', feature: featureName, phase: 'implementation', agentId: persona.id, label: persona.label, command: persona.command },
-        onData,
+        text => { output = (output + text).slice(-20000); onData?.(text); },
         (d, c) => this.agentRunner.runPersona(workspacePath, featureName, persona, agentConfig, d, c),
-        async (exit) => (await this.resolvePersonaVerdict(workspacePath, featureName, persona.id, exit)) as ExecutionStatus
+        async () => (found = await this.resolvePersonaVerdict(workspacePath, featureName, persona.id, output)).status as ExecutionStatus
       );
 
       const verdict = status as PersonaRunStatus;
       ps.status = verdict;
+      if (found?.reportPath) ps.reportPath = found.reportPath;
+      if (found?.note) ps.note = found.note;
       if (personaCost) ps.cost = personaCost;
       await this.workspaceRepo.saveWorkflowState(workspacePath, state);
 
@@ -237,26 +294,67 @@ export class WorkflowService implements WorkflowUseCases {
     return { exitCode };
   }
 
-  // A persona's verdict is read from its report (specs/<feature>/reviews/<id>.md):
-  // an explicit "VERDICT: PASS|FAIL" marker wins; otherwise we fall back to the
-  // process exit code. This is robust across heterogeneous agent CLIs that may
-  // not control their exit code reliably.
+  // Personas whose extension command (/speckit.<extension>.<name>) no enabled,
+  // installed extension provides, with what to do about it. Core Spec Kit and
+  // custom (non-speckit) commands aren't checked: nothing here says where they live.
+  private async missingPersonaCommands(workspacePath: string, personas: PersonaConfig[]): Promise<Map<PersonaId, string>> {
+    const missing = new Map<PersonaId, string>();
+    if (!this.extensions) return missing;
+    let installed: InstalledExtension[];
+    try {
+      installed = await this.extensions.listInstalled(workspacePath);
+    } catch {
+      return missing; // can't tell: let the run decide
+    }
+    for (const persona of personas) {
+      const name = persona.command.replace(/^\//, '');
+      const ns = /^speckit\.([^.]+)\.[^.]+$/.exec(name)?.[1];
+      if (!ns) continue;
+      const providers = installed.filter(e => e.commands.includes(name));
+      if (providers.some(e => e.enabled)) continue;
+      const ext = BUNDLED_EXTENSIONS.find(b => b.id === ns);
+      const extName = ext ? `“${ext.label}”` : `the “${ns}” extension`;
+      missing.set(persona.id, providers.length > 0
+        ? `${persona.label} can't run: ${extName} is disabled in this workspace, so ${persona.command} isn't available. Enable it in the Extensions section, then re-run the review.`
+        : `${persona.label} can't run: ${persona.command} isn't installed in this workspace. Install ${extName} from the Extensions section, then re-run the review.`);
+    }
+    return missing;
+  }
+
+  // A persona's verdict is its explicit "VERDICT: PASS|FAIL", from its report —
+  // specs/<feature>/reviews/<id>.md, or where agents also write it
+  // (<id>-report.md) — or else its final output. No verdict is a fail: a clean
+  // exit says nothing about the code (reviewers have "passed" features that had
+  // no code at all).
   private async resolvePersonaVerdict(
     workspacePath: string,
     featureName: string,
     id: PersonaId,
-    exitCode: number
-  ): Promise<PersonaRunStatus> {
-    let report = '';
-    try {
-      report = await this.workspaceRepo.readFile(workspacePath, personaReportPath(featureName, id));
-    } catch {
-      report = '';
+    output: string
+  ): Promise<PersonaVerdict> {
+    const compact = id.replace(/-/g, '');
+    const candidates = [...new Set([
+      personaReportPath(featureName, id),
+      `specs/${featureName}/reviews/${id}-report.md`,
+      `specs/${featureName}/${id}-report.md`,
+      `specs/${featureName}/${compact}-report.md`,
+    ])];
+    let reportPath: string | undefined;
+    for (const file of candidates) {
+      let report = '';
+      try {
+        report = await this.workspaceRepo.readFile(workspacePath, file);
+      } catch {
+        report = '';
+      }
+      if (!report.trim()) continue;
+      reportPath ??= file;
+      const v = verdictIn(report);
+      if (v) return { status: v, reportPath: file };
     }
-    const text = report.toUpperCase();
-    if (/VERDICT:\s*FAIL/.test(text)) return 'failed';
-    if (/VERDICT:\s*PASS/.test(text)) return 'passed';
-    return exitCode === 0 ? 'passed' : 'failed';
+    const fromOutput = verdictIn(output);
+    if (fromOutput) return { status: fromOutput, reportPath };
+    return { status: 'failed', reportPath, note: 'No verdict recorded (expected “VERDICT: PASS” or “VERDICT: FAIL”), so it counts as a fail. Read the report and re-run the review.' };
   }
 
   async approvePhase(workspacePath: string, phase: WorkflowPhase, featureName: string | null): Promise<WorkflowState> {
@@ -267,10 +365,58 @@ export class WorkflowService implements WorkflowUseCases {
     if (ps) {
       ps.status = 'approved';
       ps.stale = false;
+      delete ps.attention;
     }
 
     await this.workspaceRepo.saveWorkflowState(workspacePath, state);
     // Moving the card on ends a session still open for it (Clarify stays at its prompt).
+    await this.agentRunner.stop(phase, targetFeature);
+    return state;
+  }
+
+  // Quick build (from the Specification card): approve the spec, mark the
+  // phases in between as skipped, and implement straight away. The agent works
+  // out the feature and the existing project itself; with no tasks.md it writes
+  // one first (Spec Kit's format), so progress and the review gate still work.
+  async quickBuild(
+    workspacePath: string,
+    featureName: string,
+    agentConfig: AgentConfig,
+    personas?: PersonaConfig[],
+    onData?: (text: string) => void
+  ): Promise<WorkflowState> {
+    const state = await this.workspaceRepo.getWorkflowState(workspacePath);
+    const feature = state.features.find(f => f.name === featureName);
+    if (!feature) throw new Error(`Feature ${featureName} not found.`);
+    const spec = feature.phases.find(p => p.phase === 'specification');
+    if (!spec?.filePath) throw new Error('Write the spec first: a quick build implements specs/<feature>/spec.md.');
+    if (feature.phases.some(p => p.status === 'running')) throw new Error('An agent is already running on this feature.');
+
+    spec.status = 'approved';
+    spec.stale = false;
+    for (const p of feature.phases) {
+      if (p.phase !== 'specification' && p.phase !== 'implementation' && !isPhaseDone(p.status)) p.status = 'skipped';
+    }
+    const impl = feature.phases.find(p => p.phase === 'implementation')!;
+    impl.quickBuild = true;
+    await this.workspaceRepo.saveWorkflowState(workspacePath, state);
+
+    const hasTasks = !!feature.phases.find(p => p.phase === 'tasks')?.filePath;
+    return hasTasks
+      ? this.runPhase(workspacePath, 'implementation', featureName, agentConfig, quickBuildContext(), onData, personas)
+      : this.runPhase(workspacePath, 'implementation', featureName, agentConfig, undefined, onData, personas, { instruction: quickBuildInstruction(featureName) });
+  }
+
+  // Ends an interactive phase the user is done with (Clarify stays at its prompt
+  // after it finishes): the phase goes to review and its session is closed.
+  async finishPhase(workspacePath: string, phase: WorkflowPhase, featureName: string | null): Promise<WorkflowState> {
+    const state = await this.workspaceRepo.getWorkflowState(workspacePath);
+    const targetFeature = featureName || state.activeFeatureName;
+    const ps = this.findPhase(state, phase, targetFeature);
+    if (ps && ps.status === 'running') {
+      ps.status = 'awaiting_review';
+      await this.workspaceRepo.saveWorkflowState(workspacePath, state);
+    }
     await this.agentRunner.stop(phase, targetFeature);
     return state;
   }
@@ -284,11 +430,25 @@ export class WorkflowService implements WorkflowUseCases {
       ps.status = 'idle';
       ps.content = null;
       ps.stale = false;
+      delete ps.attention;
     }
 
     this.markDownstreamStale(state, phase, targetFeature);
     await this.workspaceRepo.saveWorkflowState(workspacePath, state);
     await this.agentRunner.stop(phase, targetFeature);
+    return state;
+  }
+
+  // Ticks a checkbox in whichever Markdown file is open (tasks.md, a checklist…).
+  async toggleCheckbox(workspacePath: string, filePath: string, lineIndex: number, checked: boolean): Promise<WorkflowState> {
+    await this.workspaceRepo.toggleCheckbox(workspacePath, filePath, lineIndex, checked);
+    const state = await this.workspaceRepo.getWorkflowState(workspacePath);
+    // Ticking tasks can complete the implementation.
+    const feature = state.features.find(f => f.phases.some(p => p.phase === 'tasks' && p.filePath && samePath(p.filePath, workspacePath, filePath)));
+    if (feature) {
+      await this.checkImplementationAutoReview(workspacePath, state, feature.name);
+      await this.workspaceRepo.saveWorkflowState(workspacePath, state);
+    }
     return state;
   }
 
@@ -400,4 +560,60 @@ export class WorkflowService implements WorkflowUseCases {
       // ignore
     }
   }
+}
+
+// Paths from the UI may be absolute or relative to the workspace.
+function samePath(a: string, workspacePath: string, b: string): boolean {
+  const abs = (p: string) => (p.startsWith('/') || /^[A-Za-z]:[\\/]/.test(p) ? p : `${workspacePath.replace(/[\\/]+$/, '')}/${p}`).replace(/\\/g, '/');
+  return abs(a) === abs(b);
+}
+
+type PersonaVerdict = { status: PersonaRunStatus; reportPath?: string; note?: string };
+
+// The last explicit verdict in a report or output.
+function verdictIn(text: string): PersonaRunStatus | null {
+  const all = [...text.toUpperCase().matchAll(/VERDICT:\s*\**\s*(PASS|FAIL)/g)];
+  const last = all.at(-1)?.[1];
+  return last === 'PASS' ? 'passed' : last === 'FAIL' ? 'failed' : null;
+}
+
+// Why an implement run that exited cleanly didn't actually build, or
+// undefined when it ticked at least one task.
+function implementationShortfall(
+  before: { done: number; total: number },
+  after: { done: number; total: number },
+  feature: string | null,
+  quickBuild: boolean
+): string | undefined {
+  if (after.total === 0) {
+    return quickBuild
+      ? `The quick build finished without writing specs/${feature}/tasks.md, so nothing was built.`
+      : `Implement found no tasks in specs/${feature}/tasks.md, so nothing was built. Run Planning and Tasks first, or use Quick build from the Specification card.`;
+  }
+  if (after.done > before.done) return undefined;
+  if (before.total > 0 && before.done === before.total) {
+    return `All ${after.total} tasks in tasks.md were already ticked before this run, and it ticked nothing new. If the code doesn't exist, untick the tasks that aren't really done and run Implement again.`;
+  }
+  return `Implement finished without completing any tasks (${after.done} of ${after.total} done).`;
+}
+
+// Ticked / total tasks in a feature's tasks.md.
+function taskProgress(state: WorkflowState, featureName: string | null): { done: number; total: number } {
+  const content = state.features.find(f => f.name === featureName)?.phases.find(p => p.phase === 'tasks')?.content ?? '';
+  const boxes = [...content.matchAll(/^\s*(?:[-*]|\d+\.)\s+\[( |x|X)\]/gm)];
+  return { done: boxes.filter(b => b[1] !== ' ').length, total: boxes.length };
+}
+
+// The question an agent stopped on, from the end of its output (plain text).
+export function lastQuestion(output: string): string | undefined {
+  const lines = output
+    .replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, '')
+    .split(/\r?\n/)
+    .map(l => l.replace(/\*\*/g, '').trim())
+    .filter(Boolean)
+    .filter(l => !/^(✓ Done|Process exited|▶ |→ )/.test(l));
+  for (const line of lines.slice(-12).reverse()) {
+    if (/\?\s*(\((yes|y)\s*\/\s*(no|n)\))?\s*$/i.test(line) && line.length > 10) return line.slice(0, 400);
+  }
+  return undefined;
 }

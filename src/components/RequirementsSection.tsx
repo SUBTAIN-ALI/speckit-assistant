@@ -20,6 +20,7 @@ type Props = {
 
 type Readiness = {
   engine: 'agent' | 'direct';
+  specKit?: boolean; // the open project has Spec Kit (.specify/)
   agentLabel: string | null;
   agent: { uploadProblems: string[]; zoomProblems: string[]; zoomServer: string | null };
   direct: { ready: boolean; provider: string; model: string };
@@ -41,6 +42,9 @@ export const RequirementsSection: React.FC<Props> = ({ agentConfig, agentLabel, 
   const [doc, setDoc] = useState<RequirementsDoc | null>(null);
   const [loading, setLoading] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  // "Set up Spec Kit" for a folder that doesn't have it yet.
+  const [settingUp, setSettingUp] = useState(false);
+  const [setupError, setSetupError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [retryFeature, setRetryFeature] = useState<string | null>(null);
   const [banner, setBanner] = useState<{ ok: boolean; text: string } | null>(null);
@@ -149,6 +153,45 @@ export const RequirementsSection: React.FC<Props> = ({ agentConfig, agentLabel, 
       ? `${LLM_PROVIDER_LABELS[view.llm.provider]} · ${view.llm.models[view.llm.provider]}`
       : null);
   const zoomReady = !!view?.zoom.connected && (!agentMode || (readiness?.agent.zoomProblems.length ?? 1) === 0);
+  const setUpSpecKit = async () => {
+    setSettingUp(true);
+    setSetupError(null);
+    try {
+      const res = await fetch('/api/workspace/init', { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        // The board now has a Spec Kit project to show.
+        const st = await fetch('/api/state').then(r => r.json()).catch(() => null);
+        if (st && !st.error) onStateChange(st);
+      } else {
+        const failed = (data.steps ?? []).find((s: { ok: boolean }) => !s.ok);
+        setSetupError(`${data.error || `Setup failed (${res.status}).`}${failed?.output ? `\n${String(failed.output).trim().split('\n').slice(-6).join('\n')}` : ''}`);
+      }
+    } catch (err: any) {
+      setSetupError(err.message);
+    } finally {
+      setSettingUp(false);
+      loadReadiness();
+    }
+  };
+
+  // What blocks importing, for the import dialog (null when ready).
+  const blocker = (() => {
+    if (llmLabel) return null;
+    if (!readiness) return { message: 'Checking this project’s setup…' };
+    if (readiness.specKit === false) {
+      return {
+        message: setupError ?? (readiness.agent.uploadProblems[0] ?? 'This project has no Spec Kit yet.'),
+        action: { label: settingUp ? 'Setting up…' : 'Set up Spec Kit', onClick: setUpSpecKit, busy: settingUp },
+      };
+    }
+    if (!agentMode) return { message: 'Add an AI provider key first, or switch the engine to your agent.', action: { label: 'Open settings', onClick: () => { setImportOpen(false); setTab('settings'); } } };
+    const p = readiness.agent.uploadProblems[0];
+    if (!p) return null;
+    const target = fixTarget(p);
+    const name = target === 'mcp' ? 'MCP Tools' : target === 'agents' ? 'Agents' : 'Extensions';
+    return { message: p, action: target && onNavigate ? { label: `Open ${name}`, onClick: () => { setImportOpen(false); onNavigate(target); } } : undefined };
+  })();
   const problems = agentMode && readiness
     ? [...new Set([...readiness.agent.uploadProblems, ...readiness.agent.zoomProblems])]
     : [];
@@ -274,10 +317,14 @@ export const RequirementsSection: React.FC<Props> = ({ agentConfig, agentLabel, 
               return (
                 <p key={p} className="flex items-start gap-1.5">
                   <AlertTriangle size={11} className="mt-0.5 shrink-0 text-amber-500" />
-                  <span>{p}{target && onNavigate && <> <button onClick={() => onNavigate(target)} className="underline font-semibold">Open {target === 'mcp' ? 'MCP Tools' : target === 'agents' ? 'Agents' : 'Extensions'}</button></>}</span>
+                  <span>
+                    {p}{target && onNavigate && <> <button onClick={() => onNavigate(target)} className="underline font-semibold">Open {target === 'mcp' ? 'MCP Tools' : target === 'agents' ? 'Agents' : 'Extensions'}</button></>}
+                    {readiness.specKit === false && p.includes('no Spec Kit') && <> <button onClick={setUpSpecKit} disabled={settingUp} className="underline font-semibold disabled:opacity-60">{settingUp ? 'Setting up…' : 'Set up Spec Kit'}</button></>}
+                  </span>
                 </p>
               );
             })}
+            {setupError && <p role="alert" className="whitespace-pre-wrap font-mono text-[10px] text-red-700 dark:text-red-300 bg-red-500/10 rounded p-2">{setupError}</p>}
             {!view.zoom.connected && <p>Zoom isn’t connected — you can still import uploaded transcripts.</p>}
             <button onClick={() => setTab('settings')} className="underline font-semibold">Open settings</button>
           </div>
@@ -316,6 +363,7 @@ export const RequirementsSection: React.FC<Props> = ({ agentConfig, agentLabel, 
         isOpen={importOpen}
         zoomConnected={zoomReady}
         llmLabel={llmLabel}
+        blocker={blocker}
         onClose={() => setImportOpen(false)}
         onImported={async (id, d) => { await loadSets(); setSetId(id); setDoc(d); }}
         onOpenSettings={() => { setImportOpen(false); setTab('settings'); }}

@@ -18,6 +18,11 @@ export async function POST(req: Request) {
       return NextResponse.json(state);
     }
 
+    if (action === 'finish') {
+      const state = await workflowService.finishPhase(workspacePath, phase, featureName);
+      return NextResponse.json(state);
+    }
+
     if (action === 'discard') {
       const state = await workflowService.discardPhase(workspacePath, phase, featureName);
       return NextResponse.json(state);
@@ -38,7 +43,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ success });
     }
 
-    if (action === 'run' || action === 'run-gate') {
+    if (action === 'run' || action === 'run-gate' || action === 'quick-build') {
       const encoder = new TextEncoder();
       const customReadableStream = new ReadableStream({
         async start(controller) {
@@ -57,7 +62,9 @@ export async function POST(req: Request) {
 
           try {
             const onData = (t: string) => sendEvent('log', { text: t });
-            const finalState = action === 'run-gate'
+            const finalState = action === 'quick-build'
+              ? await workflowService.quickBuild(workspacePath, featureName, agentConfig as AgentConfig, (personas ?? []) as PersonaConfig[], onData)
+              : action === 'run-gate'
               ? await workflowService.runImplementationGate(
                   workspacePath,
                   featureName,

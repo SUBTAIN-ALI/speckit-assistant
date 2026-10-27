@@ -13,7 +13,11 @@ export type PhaseStatus =
   | 'idle'             // not yet started
   | 'running'          // command sent, waiting for agent to generate file
   | 'awaiting_review'  // file appeared on disk / task run completed, waiting for review
-  | 'approved';        // user approved, phase complete
+  | 'approved'         // user approved, phase complete
+  | 'skipped';         // passed over by a quick build (counts as done; can still be run)
+
+// A phase the flow has moved past: approved, or skipped by a quick build.
+export const isPhaseDone = (status: PhaseStatus): boolean => status === 'approved' || status === 'skipped';
 
 export type PersonaId = 'qa' | 'code-review' | 'security' | 'tech-lead';
 
@@ -21,7 +25,8 @@ export type PersonaRunStatus =
   | 'idle'      // not yet run in the current gate
   | 'running'   // persona agent is executing
   | 'passed'    // review report exists with VERDICT: PASS (or clean exit)
-  | 'failed';   // VERDICT: FAIL or non-zero exit — gate stops here
+  | 'failed'    // VERDICT: FAIL or non-zero exit — gate stops here
+  | 'unavailable'; // its command isn't installed in the workspace — gate never started
 
 // Model/CLI-agnostic cost & usage captured for a single agent run. Token/cost
 // figures are best-effort: 'parsed' when the CLI printed them, otherwise
@@ -42,6 +47,7 @@ export type PersonaState = {
   status: PersonaRunStatus;
   reportPath?: string | null; // specs/<feature>/reviews/<persona>.md
   cost?: CostMetadata;        // captured cost/usage of the persona's run
+  note?: string;              // why the verdict is what it is (e.g. none was recorded)
 };
 
 // User-configurable definition of a persona (which slash command backs it).
@@ -78,6 +84,11 @@ export type PhaseState = {
   personas?: PersonaState[];
   // Captured cost/usage of the last agent run for this phase.
   cost?: CostMetadata;
+  // The last run needs the user: e.g. Implement stopped to ask a question and
+  // completed no tasks. Cleared when the phase runs again or is approved/discarded.
+  attention?: { message: string; question?: string };
+  // Implementation only: built with "Quick build" from the spec (phases skipped).
+  quickBuild?: boolean;
 };
 
 export type FeatureWorkflow = {

@@ -222,6 +222,27 @@ describe('FSWorkspaceRepository - Demo Integration Test', () => {
     expect(reImpl.personas?.find(p => p.id === 'qa')?.cost).toEqual(impl.personas![0].cost);
   });
 
+  it('persists why a run stopped, the quick-build flag and reviewer notes', async () => {
+    const repo = new FSWorkspaceRepository();
+    const feature = '001-user-authentication';
+
+    const state = await repo.getWorkflowState(tempPath);
+    const impl = state.features.find(f => f.name === feature)!.phases.find(p => p.phase === 'implementation')!;
+    impl.attention = { message: 'Implement found no tasks.', question: 'Proceed anyway? (yes/no)' };
+    impl.quickBuild = true;
+    impl.personas = [
+      { id: 'qa', status: 'unavailable', reportPath: null, note: 'QA can\'t run: /speckit.personas.qa isn\'t installed.' },
+      { id: 'security', status: 'failed', reportPath: 'specs/001-user-authentication/security-report.md' },
+    ];
+    await repo.saveWorkflowState(tempPath, state);
+
+    const reImpl = (await repo.getWorkflowState(tempPath)).features.find(f => f.name === feature)!.phases.find(p => p.phase === 'implementation')!;
+    expect(reImpl.attention).toEqual(impl.attention);
+    expect(reImpl.quickBuild).toBe(true);
+    expect(reImpl.personas?.[0]).toMatchObject({ status: 'unavailable', note: impl.personas[0].note });
+    expect(reImpl.personas?.[1].reportPath).toBe('specs/001-user-authentication/security-report.md');
+  });
+
   it('preserves approved phase statuses during reconciliation even if phase file is missing', async () => {
     const repo = new FSWorkspaceRepository();
     const feature = '002-shopping-cart';
@@ -244,3 +265,50 @@ describe('FSWorkspaceRepository - Demo Integration Test', () => {
   });
 });
 
+
+describe('FSWorkspaceRepository.toggleCheckbox', () => {
+  const os = require('os') as typeof import('os');
+  const repo = new FSWorkspaceRepository();
+  const make = () => {
+    const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'toggle-'));
+    const dir = path.join(ws, 'specs', '001-x', 'checklists');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'auth.md'), '# Auth\n\n- [ ] CHK001 one\n- [ ] CHK002 two\n');
+    fs.writeFileSync(path.join(ws, 'specs', '001-x', 'tasks.md'), '# Tasks\n\nintro\n- [ ] T001 a\n');
+    return ws;
+  };
+
+  it('ticks the line in the file that was clicked, not tasks.md', async () => {
+    const ws = make();
+    const checklist = path.join(ws, 'specs/001-x/checklists/auth.md');
+    await repo.toggleCheckbox(ws, checklist, 3, true);
+    expect(fs.readFileSync(checklist, 'utf-8')).toBe('# Auth\n\n- [ ] CHK001 one\n- [x] CHK002 two\n');
+    expect(fs.readFileSync(path.join(ws, 'specs/001-x/tasks.md'), 'utf-8')).toBe('# Tasks\n\nintro\n- [ ] T001 a\n');
+    await repo.toggleCheckbox(ws, 'specs/001-x/checklists/auth.md', 3, false); // relative paths too
+    expect(fs.readFileSync(checklist, 'utf-8')).toContain('- [ ] CHK002 two');
+  });
+
+  it('refuses a line that is not a checkbox, and files outside the project', async () => {
+    const ws = make();
+    await expect(repo.toggleCheckbox(ws, 'specs/001-x/tasks.md', 2, true)).rejects.toThrow('has moved');
+    expect(fs.readFileSync(path.join(ws, 'specs/001-x/tasks.md'), 'utf-8')).toBe('# Tasks\n\nintro\n- [ ] T001 a\n');
+    await expect(repo.toggleCheckbox(ws, '../outside.md', 0, true)).rejects.toThrow('inside the project');
+    await expect(repo.toggleCheckbox(ws, 'specs/001-x/data.json', 0, true)).rejects.toThrow('inside the project');
+  });
+});
+
+describe('FSWorkspaceRepository keeps skipped phases', () => {
+  it('does not reset a skipped phase that has no file', async () => {
+    const os = require('os') as typeof import('os');
+    const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'skipped-'));
+    fs.mkdirSync(path.join(ws, 'specs', '001-x'), { recursive: true });
+    fs.writeFileSync(path.join(ws, 'specs', '001-x', 'spec.md'), '# Spec');
+    const repo = new FSWorkspaceRepository();
+    const state = await repo.getWorkflowState(ws);
+    const f = state.features.find(x => x.name === '001-x')!;
+    f.phases.find(p => p.phase === 'planning')!.status = 'skipped';
+    await repo.saveWorkflowState(ws, state);
+    const again = await repo.getWorkflowState(ws);
+    expect(again.features.find(x => x.name === '001-x')!.phases.find(p => p.phase === 'planning')!.status).toBe('skipped');
+  });
+});

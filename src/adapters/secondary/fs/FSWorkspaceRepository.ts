@@ -202,8 +202,18 @@ export class FSWorkspaceRepository implements WorkspaceRepositoryPort {
           stale: p.stale,
           // Persist the captured cost/usage of the last run for this phase.
           ...(p.cost ? { cost: p.cost } : {}),
-          // Persist the implementation review-gate persona statuses (and their cost).
-          ...(p.personas ? { personas: p.personas.map(ps => ({ id: ps.id, status: ps.status, ...(ps.cost ? { cost: ps.cost } : {}) })) } : {})
+          // Why a run that exited cleanly isn't done (and the question it stopped on).
+          ...(p.attention ? { attention: p.attention } : {}),
+          ...(p.quickBuild ? { quickBuild: true } : {}),
+          // Persist the implementation review-gate persona statuses (cost, the
+          // report the verdict came from, and why — e.g. not installed).
+          ...(p.personas ? { personas: p.personas.map(ps => ({
+            id: ps.id,
+            status: ps.status,
+            ...(ps.cost ? { cost: ps.cost } : {}),
+            ...(ps.reportPath ? { reportPath: ps.reportPath } : {}),
+            ...(ps.note ? { note: ps.note } : {}),
+          })) } : {})
         }))
       })),
       activeFeatureName: state.activeFeatureName
@@ -217,22 +227,26 @@ export class FSWorkspaceRepository implements WorkspaceRepositoryPort {
     if (!fs.existsSync(tasksPath)) {
       throw new Error(`Tasks file not found at ${tasksPath}`);
     }
-
-    const content = fs.readFileSync(tasksPath, 'utf-8');
-    const lines = content.split('\n');
-    if (lineIndex < 0 || lineIndex >= lines.length) {
-      throw new Error(`Line index ${lineIndex} out of range`);
-    }
-
-    lines[lineIndex] = lines[lineIndex].replace(
-      /^(\s*(?:[-*]|\d+\.)\s+\[)( |x|X)(\])/,
-      (_, pre, _c, post) => `${pre}${checked ? 'x' : ' '}${post}`
-    );
-
-    fs.writeFileSync(tasksPath, lines.join('\n'), 'utf-8');
-
-    // Return the updated state
+    await this.toggleCheckbox(workspacePath, tasksPath, lineIndex, checked);
     return this.getWorkflowState(workspacePath);
+  }
+
+  async toggleCheckbox(workspacePath: string, filePath: string, lineIndex: number, checked: boolean): Promise<void> {
+    const root = path.resolve(workspacePath);
+    const target = path.resolve(root, filePath);
+    if (!target.startsWith(root + path.sep) || !target.endsWith('.md')) {
+      throw new Error('Only Markdown files inside the project can be ticked.');
+    }
+    if (!fs.existsSync(target)) throw new Error(`File not found: ${path.relative(root, target)}`);
+
+    const lines = fs.readFileSync(target, 'utf-8').split('\n');
+    const checkbox = /^(\s*(?:[-*]|\d+\.)\s+\[)( |x|X)(\])/;
+    if (lineIndex < 0 || lineIndex >= lines.length || !checkbox.test(lines[lineIndex])) {
+      // Never edit some other line: the file changed since it was shown.
+      throw new Error('That checkbox has moved (the file changed). Reload the file and try again.');
+    }
+    lines[lineIndex] = lines[lineIndex].replace(checkbox, (_, pre, _c, post) => `${pre}${checked ? 'x' : ' '}${post}`);
+    fs.writeFileSync(target, lines.join('\n'), 'utf-8');
   }
 
   async createFeature(workspacePath: string, name: string): Promise<WorkflowState> {
@@ -351,7 +365,7 @@ export class FSWorkspaceRepository implements WorkspaceRepositoryPort {
   }
 
   private isUserState(status: PhaseStatus): boolean {
-    return status === 'running' || status === 'approved';
+    return status === 'running' || status === 'approved' || status === 'skipped';
   }
 
   private loadStateFile(workspacePath: string): WorkflowState | null {
@@ -381,8 +395,16 @@ export class FSWorkspaceRepository implements WorkspaceRepositoryPort {
               filePath: null,
               content: null,
               ...(savedPhase?.cost ? { cost: savedPhase.cost } : {}),
+              ...(savedPhase?.attention?.message ? { attention: savedPhase.attention } : {}),
+              ...(savedPhase?.quickBuild ? { quickBuild: true } : {}),
               ...(Array.isArray(savedPhase?.personas)
-                ? { personas: savedPhase.personas.map((ps: any) => ({ id: ps.id, status: ps.status || 'idle', ...(ps.cost ? { cost: ps.cost } : {}) })) }
+                ? { personas: savedPhase.personas.map((ps: any) => ({
+                    id: ps.id,
+                    status: ps.status || 'idle',
+                    ...(ps.cost ? { cost: ps.cost } : {}),
+                    ...(typeof ps.reportPath === 'string' ? { reportPath: ps.reportPath } : {}),
+                    ...(ps.note ? { note: ps.note } : {}),
+                  })) }
                 : {})
             };
           })

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { previewService } from '../../../adapters/di';
 import { getWorkspacePath } from '../../../adapters/primary/api/utils';
 import {
   describeWorkspace,
@@ -24,6 +25,8 @@ export async function POST(req: Request) {
     const { path: input } = await req.json();
     const r = resolveWorkspaceInput(typeof input === 'string' ? input : '');
     if (!r.ok) return NextResponse.json({ error: r.error }, { status: 400 });
+    // The old project's dev server shouldn't keep running in the background.
+    if (r.path !== getWorkspacePath()) await previewService.stopAll();
     saveCurrentWorkspace(r.path);
     // The CLI pins the launch folder in WORKSPACE_PATH, which getWorkspacePath()
     // reads first; update it so every route of this server follows the switch.
