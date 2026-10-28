@@ -616,6 +616,123 @@ describe('WorkflowService', () => {
       expect(state).toBe(tasksMissingState);
     });
   });
+
+  describe('fix mode', () => {
+    const fixState = (): WorkflowState => {
+      const s: WorkflowState = JSON.parse(JSON.stringify(mockState));
+      const impl = s.features[0].phases.find(p => p.phase === 'implementation')!;
+      impl.status = 'running';
+      impl.personas = [
+        { id: 'qa', status: 'passed', reportPath: 'specs/auth/reviews/qa.md' },
+        { id: 'code-review', status: 'passed', reportPath: 'specs/auth/reviews/code-review.md' },
+        { id: 'security', status: 'failed', reportPath: 'specs/auth/reviews/security.md', failureSummary: 'Missing CSRF', suggestedFix: 'Add CSRF token' },
+        { id: 'tech-lead', status: 'idle' },
+      ];
+      return s;
+    };
+
+    it('applies fix, re-reviews the failed persona, and continues the gate', async () => {
+      const st = fixState();
+      workspaceRepo.getWorkflowState.mockResolvedValue(st);
+      workspaceRepo.readFile.mockImplementation(async (_w: string, p: string) => {
+        if (p.includes('security')) return '## Blocking\n- CSRF missing\n\nVERDICT: PASS';
+        if (p.includes('tech-lead')) return 'VERDICT: PASS';
+        if (p.includes('patch-notes')) throw new Error('ENOENT');
+        return '';
+      });
+      workspaceRepo.writeFile.mockResolvedValue(undefined);
+      agentRunner.runPhase = vi.fn().mockResolvedValue(0);
+      agentRunner.runPersona = vi.fn().mockResolvedValue(0);
+
+      const state = await service.runFix(
+        '/workspace', 'auth', 'security', 'Add CSRF token to upload',
+        { agentType: 'claude' }, DEFAULT_PERSONAS
+      );
+
+      const impl = state.features[0].phases.find(p => p.phase === 'implementation')!;
+      expect(impl.status).toBe('awaiting_review');
+      expect(impl.personas!.find(p => p.id === 'security')!.status).toBe('passed');
+      expect(impl.personas!.find(p => p.id === 'tech-lead')!.status).toBe('passed');
+      expect(agentRunner.runPhase).toHaveBeenCalledTimes(1);
+      // Only security + tech-lead run, not qa/code-review again
+      expect(agentRunner.runPersona).toHaveBeenCalledTimes(2);
+    });
+
+    it('leaves the gate blocked if the fix re-review still fails', async () => {
+      const st = fixState();
+      workspaceRepo.getWorkflowState.mockResolvedValue(st);
+      workspaceRepo.readFile.mockImplementation(async (_w: string, p: string) => {
+        if (p.includes('security')) return '## Blocking\n- Still vulnerable\n\nVERDICT: FAIL';
+        if (p.includes('patch-notes')) throw new Error('ENOENT');
+        return '';
+      });
+      workspaceRepo.writeFile.mockResolvedValue(undefined);
+      agentRunner.runPhase = vi.fn().mockResolvedValue(0);
+      agentRunner.runPersona = vi.fn().mockResolvedValue(0);
+
+      const state = await service.runFix(
+        '/workspace', 'auth', 'security', 'Try fixing CSRF',
+        { agentType: 'claude' }, DEFAULT_PERSONAS
+      );
+
+      const impl = state.features[0].phases.find(p => p.phase === 'implementation')!;
+      expect(impl.status).toBe('running'); // still blocked
+      expect(impl.personas!.find(p => p.id === 'security')!.status).toBe('failed');
+      expect(impl.personas!.find(p => p.id === 'tech-lead')!.status).toBe('idle');
+    });
+
+    it('writes a patch note', async () => {
+      const st = fixState();
+      workspaceRepo.getWorkflowState.mockResolvedValue(st);
+      workspaceRepo.readFile.mockImplementation(async (_w: string, p: string) => {
+        if (p.includes('patch-notes')) throw new Error('ENOENT');
+        return 'VERDICT: PASS';
+      });
+      workspaceRepo.writeFile.mockResolvedValue(undefined);
+      agentRunner.runPhase = vi.fn().mockResolvedValue(0);
+      agentRunner.runPersona = vi.fn().mockResolvedValue(0);
+
+      await service.runFix(
+        '/workspace', 'auth', 'security', 'Add CSRF protection',
+        { agentType: 'claude' }, DEFAULT_PERSONAS
+      );
+
+      const writeCall = workspaceRepo.writeFile.mock.calls.find(
+        (args: any[]) => typeof args[1] === 'string' && args[1].includes('patch-notes')
+      );
+      expect(writeCall).toBeDefined();
+      expect(writeCall![2]).toContain('Add CSRF protection');
+      expect(writeCall![2]).toContain('Security');
+    });
+
+    it('rejects when the persona is not in a failed state', async () => {
+      const st = fixState();
+      st.features[0].phases.find(p => p.phase === 'implementation')!.personas!.find(p => p.id === 'security')!.status = 'passed';
+      workspaceRepo.getWorkflowState.mockResolvedValue(st);
+
+      await expect(
+        service.runFix('/workspace', 'auth', 'security', 'fix something', { agentType: 'claude' }, DEFAULT_PERSONAS)
+      ).rejects.toThrow("not in a failed state");
+    });
+
+    it('reverts to failed state when the fix agent crashes', async () => {
+      const st = fixState();
+      workspaceRepo.getWorkflowState.mockResolvedValue(st);
+      workspaceRepo.readFile.mockImplementation(async (_w: string, p: string) => {
+        if (p.includes('patch-notes')) throw new Error('ENOENT');
+        return '';
+      });
+      workspaceRepo.writeFile.mockResolvedValue(undefined);
+      agentRunner.runPhase = vi.fn().mockRejectedValue(new Error('agent crashed'));
+
+      await expect(
+        service.runFix('/workspace', 'auth', 'security', 'fix', { agentType: 'claude' }, DEFAULT_PERSONAS)
+      ).rejects.toThrow('agent crashed');
+
+      const impl = st.features[0].phases.find(p => p.phase === 'implementation')!;
+      expect(impl.personas!.find(p => p.id === 'security')!.status).toBe('failed');
+    });
+  });
 });
 
 

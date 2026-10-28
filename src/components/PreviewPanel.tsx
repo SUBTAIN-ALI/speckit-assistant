@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ExternalLink, Loader2, Monitor, Play, RotateCw, Smartphone, Square, Wand2, Wrench } from 'lucide-react';
+import { ExternalLink, Loader2, Monitor, Play, RotateCw, Square, Wand2, Wrench } from 'lucide-react';
 import { PreviewConfig, PreviewStatus, normalizePath, stripAnsi } from '../domain/models/preview';
 import { readSse } from '../lib/sse';
 
@@ -22,8 +22,6 @@ export const PreviewPanel: React.FC<Props> = ({ active, featureName }) => {
   const [agentResult, setAgentResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({ command: '', cwd: '', path: '' });
-  const [width, setWidth] = useState<'desktop' | 'mobile'>('desktop');
-  const [frameKey, setFrameKey] = useState(0);
   const [showLogs, setShowLogs] = useState(false);
   const logRef = useRef<HTMLPreElement>(null);
 
@@ -62,7 +60,6 @@ export const PreviewPanel: React.FC<Props> = ({ active, featureName }) => {
       const data = await res.json();
       if (!res.ok) setError(data.error);
       else setView(data);
-      if (action === 'start') setFrameKey(k => k + 1);
     } finally {
       setBusy(null);
     }
@@ -121,6 +118,15 @@ export const PreviewPanel: React.FC<Props> = ({ active, featureName }) => {
   const config = view?.config ?? null;
   const status = view?.status;
   const pageUrl = status?.url ? `${status.url}${config?.path ?? ''}` : null;
+
+  // Auto-open in a new browser tab once the server is ready.
+  const prevStateRef = useRef(state);
+  useEffect(() => {
+    if (prevStateRef.current !== 'running' && state === 'running' && pageUrl) {
+      window.open(pageUrl, '_blank', 'noopener');
+    }
+    prevStateRef.current = state;
+  }, [state, pageUrl]);
   const agentBusy = agentRun !== null;
   const btn = 'flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-900 disabled:opacity-40';
   const primary = 'flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold bg-black dark:bg-white text-white dark:text-black hover:opacity-90 disabled:opacity-40';
@@ -154,11 +160,7 @@ export const PreviewPanel: React.FC<Props> = ({ active, featureName }) => {
             {pageUrl && (
               <div className="ml-auto flex items-center gap-1">
                 <span className="text-[10px] font-mono text-zinc-500 truncate max-w-[220px]">{pageUrl}</span>
-                <button className={btn} onClick={() => setFrameKey(k => k + 1)} title="Reload the page"><RotateCw size={11} /></button>
-                <button className={btn} onClick={() => setWidth(w => (w === 'desktop' ? 'mobile' : 'desktop'))} title={width === 'desktop' ? 'Phone width' : 'Full width'}>
-                  {width === 'desktop' ? <Smartphone size={11} /> : <Monitor size={11} />}
-                </button>
-                <a className={btn} href={pageUrl} target="_blank" rel="noreferrer" title="Open in a new tab"><ExternalLink size={11} /></a>
+                <a className={btn} href={pageUrl} target="_blank" rel="noreferrer" title="Open in browser"><ExternalLink size={11} /> Open</a>
               </div>
             )}
           </>
@@ -223,13 +225,20 @@ export const PreviewPanel: React.FC<Props> = ({ active, featureName }) => {
             )}
           </div>
         ) : status?.state === 'running' && pageUrl ? (
-          <div className="flex-1 min-h-0 flex justify-center bg-zinc-100 dark:bg-zinc-900">
-            <iframe
-              key={frameKey}
-              src={pageUrl}
-              title="Project preview"
-              className={`h-full bg-white border-0 ${width === 'mobile' ? 'w-[390px] border-x border-zinc-300 dark:border-zinc-700' : 'w-full'}`}
-            />
+          <div className="flex-1 min-h-0 flex flex-col items-center justify-center gap-4 bg-zinc-50 dark:bg-zinc-900/50">
+            <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
+              <Monitor size={20} />
+              <span className="text-sm font-semibold">Preview is running</span>
+            </div>
+            <a href={pageUrl} target="_blank" rel="noreferrer"
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-black dark:bg-white text-white dark:text-black text-sm font-semibold hover:opacity-90">
+              <ExternalLink size={14} /> Open in Browser
+            </a>
+            <code className="text-[11px] font-mono text-zinc-500">{pageUrl}</code>
+            <p className="text-[10px] text-zinc-400 max-w-xs text-center">
+              Your project opens in a new browser tab automatically when the server starts.
+              Click the button above to reopen it.
+            </p>
           </div>
         ) : (
           <div className="p-4 space-y-2">
@@ -256,11 +265,6 @@ export const PreviewPanel: React.FC<Props> = ({ active, featureName }) => {
             </button>
             {showLogs && <pre ref={logRef} className="max-h-48 overflow-auto bg-zinc-950 text-zinc-300 text-[10px] font-mono p-2 whitespace-pre-wrap">{status.logs}</pre>}
           </div>
-        )}
-        {status?.state === 'running' && (
-          <p className="px-3 py-1 text-[10px] text-zinc-400 border-t border-zinc-200 dark:border-zinc-800">
-            Blank page? Some apps refuse to be shown inside another page. Use <ExternalLink size={9} className="inline" /> to open it in a new tab.
-          </p>
         )}
       </div>
     </div>

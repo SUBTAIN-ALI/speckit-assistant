@@ -48,6 +48,8 @@ export type PersonaState = {
   reportPath?: string | null; // specs/<feature>/reviews/<persona>.md
   cost?: CostMetadata;        // captured cost/usage of the persona's run
   note?: string;              // why the verdict is what it is (e.g. none was recorded)
+  failureSummary?: string;    // blocking findings extracted from the review report
+  suggestedFix?: string;      // one-line fix instruction for the "Fix & Retry" UI
 };
 
 // User-configurable definition of a persona (which slash command backs it).

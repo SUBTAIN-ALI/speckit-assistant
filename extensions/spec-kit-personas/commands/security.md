@@ -11,9 +11,12 @@ The feature directory is: `$ARGUMENTS` (e.g. `specs/001-my-feature`).
 
 ## Steps
 1. Read `$ARGUMENTS/spec.md` and `$ARGUMENTS/plan.md` to understand inputs, trust boundaries and data flow.
-2. Audit the implemented code for: injection (SQL/command/path), authn/authz gaps, secrets in code,
+2. If `$ARGUMENTS/patch-notes.md` exists, read it. These are fixes applied after prior security or
+   other review failures. Verify that previously flagged vulnerabilities were addressed, and check
+   for regressions introduced by the fix itself.
+3. Audit the implemented code for: injection (SQL/command/path), authn/authz gaps, secrets in code,
    unsafe deserialization, SSRF, missing input validation, insecure defaults, and sensitive-data exposure.
-3. Consider the dependencies introduced by this feature.
+4. Consider the dependencies introduced by this feature.
 
 ## Output
 Write your findings to `$ARGUMENTS/reviews/security.md` with:

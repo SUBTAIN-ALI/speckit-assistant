@@ -122,7 +122,9 @@ export class FSWorkspaceRepository implements WorkspaceRepositoryPort {
           }
         }
 
-        // Reconcile clarification (clarification.md or clarify.md)
+        // Reconcile clarification (clarification.md or clarify.md).
+        // Clarification modifies spec.md rather than producing its own file,
+        // so an absent file must never reset the runtime status.
         const clarifyPhase = feature.phases.find(p => p.phase === 'clarification')!;
         const clarifyPath1 = path.join(specsDir, feature.name, 'clarification.md');
         const clarifyPath2 = path.join(specsDir, feature.name, 'clarify.md');
@@ -137,9 +139,6 @@ export class FSWorkspaceRepository implements WorkspaceRepositoryPort {
         } else {
           clarifyPhase.filePath = null;
           clarifyPhase.content = null;
-          if (!this.isUserState(clarifyPhase.status)) {
-            clarifyPhase.status = 'idle';
-          }
         }
 
         // Implementation phase doesn't have its own file, but we can resolve its status.

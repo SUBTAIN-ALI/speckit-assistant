@@ -1,5 +1,5 @@
 import React from 'react';
-import { WorkflowState, FeatureWorkflow, WorkflowPhase, PhaseState, PersonaState, isPhaseDone } from '../domain/models/types';
+import { WorkflowState, FeatureWorkflow, WorkflowPhase, PhaseState, PersonaState, PersonaId, isPhaseDone } from '../domain/models/types';
 import { Play, Check, RotateCcw, AlertTriangle, CheckCircle2, ChevronRight, Trash2, ShieldCheck, ChevronDown, ChevronUp, ShieldAlert, Info, X, MonitorPlay, Zap } from 'lucide-react';
 
 type KanbanBoardProps = {
@@ -22,6 +22,8 @@ type KanbanBoardProps = {
   onAnswerPhase?: (phase: WorkflowPhase, featureName: string, answer: string) => void;
   // Specification card: approve the spec, skip to Implementation and build now.
   onQuickBuild?: (featureName: string) => void;
+  // Fix & Retry: targeted fix for a failed review persona.
+  onFixAndRetry?: (featureName: string, failedPersonaId: PersonaId, fixInstruction: string) => void;
 };
 
 // What "Yes, proceed" tells an agent that stopped to ask before building.
@@ -97,9 +99,11 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
   onFinishPhase,
   onPreview,
   onAnswerPhase,
-  onQuickBuild
+  onQuickBuild,
+  onFixAndRetry
 }) => {
   const [answers, setAnswers] = React.useState<Record<string, string>>({});
+  const [fixInputs, setFixInputs] = React.useState<Record<string, string>>({});
   const [dragOverCol, setDragOverCol] = React.useState<string | null>(null);
   const [expandedGateFeature, setExpandedGateFeature] = React.useState<string | null>(null);
 
@@ -534,6 +538,48 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                             </div>
                           )}
                         </div>
+
+                        {/* Fix Mode: shown when a review persona failed the gate */}
+                        {gateBlocker(activePhaseState)?.status === 'failed' && onFixAndRetry && (
+                          <div className="mt-3 p-2.5 rounded-md border border-red-500/20 bg-red-500/5 text-[10px] leading-normal space-y-2" onClick={e => e.stopPropagation()}>
+                            {gateBlocker(activePhaseState)?.failureSummary && (
+                              <p className="text-red-700 dark:text-red-300 font-medium line-clamp-3">
+                                <ShieldAlert size={10} className="inline mr-1 -mt-px" />
+                                {gateBlocker(activePhaseState)!.failureSummary}
+                              </p>
+                            )}
+                            {gateBlocker(activePhaseState)?.suggestedFix && (
+                              <button
+                                onClick={() => onFixAndRetry(feature.name, gateBlocker(activePhaseState)!.id, gateBlocker(activePhaseState)!.suggestedFix!)}
+                                className="w-full text-left px-2 py-1.5 rounded bg-black dark:bg-white text-white dark:text-black font-semibold text-[10px] hover:opacity-90 transition"
+                              >
+                                Apply Suggested Fix: {gateBlocker(activePhaseState)!.suggestedFix}
+                              </button>
+                            )}
+                            <div className="flex items-center gap-1">
+                              <input
+                                value={fixInputs[feature.name] ?? ''}
+                                onChange={e => setFixInputs(fi => ({ ...fi, [feature.name]: e.target.value }))}
+                                placeholder="Or describe a custom fix…"
+                                aria-label="Custom fix instruction"
+                                className="flex-1 min-w-[90px] px-1.5 py-1 rounded border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950"
+                              />
+                              <button
+                                onClick={() => {
+                                  const instruction = (fixInputs[feature.name] ?? '').trim();
+                                  if (instruction) {
+                                    onFixAndRetry(feature.name, gateBlocker(activePhaseState)!.id, instruction);
+                                    setFixInputs(fi => ({ ...fi, [feature.name]: '' }));
+                                  }
+                                }}
+                                disabled={!(fixInputs[feature.name] ?? '').trim()}
+                                className="px-2 py-1 rounded bg-black dark:bg-white text-white dark:text-black font-semibold disabled:opacity-40 transition"
+                              >
+                                Fix &amp; Retry
+                              </button>
+                            </div>
+                          </div>
+                        )}
 
                         {/* The last run stopped and needs the user (e.g. Implement asked a question) */}
                         {activePhaseState.attention && (

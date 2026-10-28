@@ -20,6 +20,8 @@ import { DevOpsAgent } from '../models/devopsAgents';
 import { orderPersonas, personaReportPath } from '../models/personas';
 import { BUNDLED_EXTENSIONS, InstalledExtension } from '../models/extensions';
 import { quickBuildContext, quickBuildInstruction } from './implementPrompt';
+import { extractFixSuggestion } from './fixExtraction';
+import { appendPatchNote, patchNotesPath } from './patchNotes';
 
 const FEATURE_PHASES: WorkflowPhase[] = [
   'specification',
@@ -120,9 +122,17 @@ export class WorkflowService implements WorkflowUseCases {
     const tasksBefore = taskProgress(state, targetFeature);
     // The run's last words, to show a question it stopped on.
     let tail = '';
+    // Interactive clarification: auto-finish when the agent prints its
+    // completion report so the card moves to awaiting_review without the
+    // user having to click Finish manually.
+    let autoFinished = false;
     const capture = (text: string) => {
       tail = (tail + text).slice(-8000);
       onData?.(text);
+      if (phase === 'clarification' && !autoFinished && /Completion Report/i.test(tail)) {
+        autoFinished = true;
+        this.finishPhase(workspacePath, phase, targetFeature).catch(() => {});
+      }
     };
 
     try {
@@ -259,6 +269,8 @@ export class WorkflowService implements WorkflowUseCases {
       ps.status = verdict;
       if (found?.reportPath) ps.reportPath = found.reportPath;
       if (found?.note) ps.note = found.note;
+      if (found?.failureSummary) ps.failureSummary = found.failureSummary;
+      if (found?.suggestedFix) ps.suggestedFix = found.suggestedFix;
       if (personaCost) ps.cost = personaCost;
       await this.workspaceRepo.saveWorkflowState(workspacePath, state);
 
@@ -272,6 +284,160 @@ export class WorkflowService implements WorkflowUseCases {
     implPhase.status = 'awaiting_review';
     await this.workspaceRepo.saveWorkflowState(workspacePath, state);
     onData?.(`\r\n\x1b[32m✓ Review gate completo — pronto para aprovação.\x1b[0m\r\n`);
+    return state;
+  }
+
+  // Targeted fix after a review persona failed: writes a patch note, runs a
+  // lightweight fix agent (review report + instruction only), re-reviews with
+  // just the failed persona, then continues the gate from that point.
+  async runFix(
+    workspacePath: string,
+    featureName: string,
+    failedPersonaId: PersonaId,
+    fixInstruction: string,
+    agentConfig: AgentConfig,
+    personas: PersonaConfig[],
+    onData?: (text: string) => void
+  ): Promise<WorkflowState> {
+    const state = await this.workspaceRepo.getWorkflowState(workspacePath);
+    const implPhase = this.findPhase(state, 'implementation', featureName);
+    if (!implPhase?.personas) throw new Error('No implementation gate state found.');
+
+    const failedPs = implPhase.personas.find(p => p.id === failedPersonaId);
+    if (!failedPs || failedPs.status !== 'failed') {
+      throw new Error(`Persona '${failedPersonaId}' is not in a failed state.`);
+    }
+
+    const personaConfig = personas.find(p => p.id === failedPersonaId);
+    if (!personaConfig) throw new Error(`No config for persona '${failedPersonaId}'.`);
+
+    // 1. Write patch note
+    const readFile = (p: string) => this.workspaceRepo.readFile(workspacePath, p);
+    const writeFileAdapter = async (p: string, c: string) => { await this.workspaceRepo.writeFile(workspacePath, p, c); };
+    await appendPatchNote(readFile, writeFileAdapter, featureName, {
+      personaId: failedPersonaId,
+      personaLabel: personaConfig.label,
+      fixInstruction,
+      timestamp: new Date().toISOString(),
+    });
+
+    // 2. Build minimal fix prompt from the review report + instruction
+    let reviewReport = '';
+    if (failedPs.reportPath) {
+      try { reviewReport = await this.workspaceRepo.readFile(workspacePath, failedPs.reportPath); } catch { /* */ }
+    }
+    let patchNotes = '';
+    try { patchNotes = await readFile(patchNotesPath(featureName)); } catch { /* */ }
+
+    const fixPrompt = [
+      `You are fixing a review failure in specs/${featureName}/.`,
+      '',
+      '## Review Report',
+      reviewReport || '(no report available)',
+      '',
+      '## Fix Instruction',
+      fixInstruction,
+      '',
+      patchNotes ? `## Patch Notes\n${patchNotes}` : '',
+      '',
+      'Apply ONLY the fix described above. Do not re-implement the full feature.',
+      'Read the review report, understand the blocking findings, and make targeted changes to resolve them.',
+      'After applying the fix, verify it addresses the blocking findings.',
+    ].filter(Boolean).join('\n');
+
+    // 3. Run the fix agent
+    failedPs.status = 'running';
+    delete failedPs.failureSummary;
+    delete failedPs.suggestedFix;
+    implPhase.status = 'running';
+    await this.workspaceRepo.saveWorkflowState(workspacePath, state);
+
+    onData?.(`\r\n\x1b[36m=== Fix: applying fix for ${personaConfig.label} ===\x1b[0m\r\n`);
+
+    try {
+      await this.recordRun(
+        workspacePath,
+        { kind: 'fix', feature: featureName, phase: 'implementation', agentId: failedPersonaId, label: `Fix: ${personaConfig.label}` },
+        text => onData?.(text),
+        (d, c) => this.agentRunner.runPhase(workspacePath, 'implementation', featureName, agentConfig, undefined, d, c, { instruction: fixPrompt })
+      );
+    } catch (err) {
+      failedPs.status = 'failed';
+      await this.workspaceRepo.saveWorkflowState(workspacePath, state);
+      throw err;
+    }
+
+    // 4. Scoped re-review: only the failed persona
+    onData?.(`\r\n\x1b[36m=== Re-reviewing: ${personaConfig.label} ===\x1b[0m\r\n`);
+    failedPs.status = 'running';
+    await this.workspaceRepo.saveWorkflowState(workspacePath, state);
+
+    let output = '';
+    let found: PersonaVerdict | undefined;
+    const { cost: personaCost, status: reviewStatus } = await this.recordRun(
+      workspacePath,
+      { kind: 'persona', feature: featureName, phase: 'implementation', agentId: failedPersonaId, label: personaConfig.label, command: personaConfig.command },
+      text => { output = (output + text).slice(-20000); onData?.(text); },
+      (d, c) => this.agentRunner.runPersona(workspacePath, featureName, personaConfig, agentConfig, d, c),
+      async () => (found = await this.resolvePersonaVerdict(workspacePath, featureName, failedPersonaId, output)).status as ExecutionStatus
+    );
+
+    const verdict = reviewStatus as PersonaRunStatus;
+    failedPs.status = verdict;
+    if (found?.reportPath) failedPs.reportPath = found.reportPath;
+    if (found?.note) failedPs.note = found.note;
+    if (found?.failureSummary) failedPs.failureSummary = found.failureSummary;
+    if (found?.suggestedFix) failedPs.suggestedFix = found.suggestedFix;
+    if (personaCost) failedPs.cost = personaCost;
+    await this.workspaceRepo.saveWorkflowState(workspacePath, state);
+
+    if (verdict === 'failed') {
+      onData?.(`\r\n\x1b[31m✗ ${personaConfig.label} still failed after fix.\x1b[0m\r\n`);
+      return state;
+    }
+    onData?.(`\r\n\x1b[32m✓ ${personaConfig.label} passed after fix.\x1b[0m\r\n`);
+
+    // 5. Continue the gate: run remaining personas after the one that just passed
+    const enabled = orderPersonas(personas.filter(p => p.enabled));
+    const passedIdx = enabled.findIndex(p => p.id === failedPersonaId);
+    const remaining = enabled.slice(passedIdx + 1);
+
+    for (const persona of remaining) {
+      const ps = implPhase.personas!.find(x => x.id === persona.id)!;
+      ps.status = 'running';
+      await this.workspaceRepo.saveWorkflowState(workspacePath, state);
+
+      onData?.(`\r\n\x1b[36m=== Persona: ${persona.label} (${persona.command}) ===\x1b[0m\r\n`);
+
+      let pOutput = '';
+      let pFound: PersonaVerdict | undefined;
+      const { cost: pCost, status: pStatus } = await this.recordRun(
+        workspacePath,
+        { kind: 'persona', feature: featureName, phase: 'implementation', agentId: persona.id, label: persona.label, command: persona.command },
+        text => { pOutput = (pOutput + text).slice(-20000); onData?.(text); },
+        (d, c) => this.agentRunner.runPersona(workspacePath, featureName, persona, agentConfig, d, c),
+        async () => (pFound = await this.resolvePersonaVerdict(workspacePath, featureName, persona.id, pOutput)).status as ExecutionStatus
+      );
+
+      const pVerdict = pStatus as PersonaRunStatus;
+      ps.status = pVerdict;
+      if (pFound?.reportPath) ps.reportPath = pFound.reportPath;
+      if (pFound?.note) ps.note = pFound.note;
+      if (pFound?.failureSummary) ps.failureSummary = pFound.failureSummary;
+      if (pFound?.suggestedFix) ps.suggestedFix = pFound.suggestedFix;
+      if (pCost) ps.cost = pCost;
+      await this.workspaceRepo.saveWorkflowState(workspacePath, state);
+
+      if (pVerdict === 'failed') {
+        onData?.(`\r\n\x1b[31m✗ ${persona.label} blocked the gate.\x1b[0m\r\n`);
+        return state;
+      }
+      onData?.(`\r\n\x1b[32m✓ ${persona.label} passed.\x1b[0m\r\n`);
+    }
+
+    implPhase.status = 'awaiting_review';
+    await this.workspaceRepo.saveWorkflowState(workspacePath, state);
+    onData?.(`\r\n\x1b[32m✓ Review gate complete — ready for approval.\x1b[0m\r\n`);
     return state;
   }
 
@@ -340,6 +506,7 @@ export class WorkflowService implements WorkflowUseCases {
       `specs/${featureName}/${compact}-report.md`,
     ])];
     let reportPath: string | undefined;
+    let reportText = '';
     for (const file of candidates) {
       let report = '';
       try {
@@ -349,12 +516,20 @@ export class WorkflowService implements WorkflowUseCases {
       }
       if (!report.trim()) continue;
       reportPath ??= file;
+      if (!reportText) reportText = report;
       const v = verdictIn(report);
-      if (v) return { status: v, reportPath: file };
+      if (v) {
+        const fix = v === 'failed' ? extractFixSuggestion(report) : undefined;
+        return { status: v, reportPath: file, ...fix };
+      }
     }
     const fromOutput = verdictIn(output);
-    if (fromOutput) return { status: fromOutput, reportPath };
-    return { status: 'failed', reportPath, note: 'No verdict recorded (expected “VERDICT: PASS” or “VERDICT: FAIL”), so it counts as a fail. Read the report and re-run the review.' };
+    if (fromOutput) {
+      const fix = fromOutput === 'failed' ? extractFixSuggestion(reportText || output) : undefined;
+      return { status: fromOutput, reportPath, ...fix };
+    }
+    const fix = extractFixSuggestion(reportText || output);
+    return { status: 'failed', reportPath, note: 'No verdict recorded (expected “VERDICT: PASS” or “VERDICT: FAIL”), so it counts as a fail. Read the report and re-run the review.', ...fix };
   }
 
   async approvePhase(workspacePath: string, phase: WorkflowPhase, featureName: string | null): Promise<WorkflowState> {
@@ -568,7 +743,7 @@ function samePath(a: string, workspacePath: string, b: string): boolean {
   return abs(a) === abs(b);
 }
 
-type PersonaVerdict = { status: PersonaRunStatus; reportPath?: string; note?: string };
+type PersonaVerdict = { status: PersonaRunStatus; reportPath?: string; note?: string; failureSummary?: string; suggestedFix?: string };
 
 // The last explicit verdict in a report or output.
 function verdictIn(text: string): PersonaRunStatus | null {

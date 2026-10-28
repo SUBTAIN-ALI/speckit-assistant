@@ -29,13 +29,13 @@ describe('PreviewPanel', () => {
     expect(calls).toContainEqual({ url: '/api/preview/agent', method: 'POST', body: { mode: 'prepare', feature: '001-signup' } });
   });
 
-  it('shows the running page with its address', async () => {
+  it('shows the running state with an open-in-browser link', async () => {
     mockApi({ config: { command: 'pnpm dev', path: '/signup' }, status: { state: 'running', url: 'http://localhost:5173', logs: 'ready' } });
     render(<PreviewPanel active featureName={null} />);
-    const frame = await screen.findByTitle('Project preview');
-    expect(frame.getAttribute('src')).toBe('http://localhost:5173/signup');
+    const link = await screen.findByText('Open in Browser');
+    expect(link.closest('a')!.getAttribute('href')).toBe('http://localhost:5173/signup');
     expect(screen.getByText('Stop')).toBeTruthy();
-    expect(screen.getByTitle('Open in a new tab').getAttribute('href')).toBe('http://localhost:5173/signup');
+    expect(screen.getByText('Preview is running')).toBeTruthy();
   });
 
   it('shows the failure and its output, and offers the agent fix', async () => {

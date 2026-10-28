@@ -12,9 +12,12 @@ The feature directory is: `$ARGUMENTS` (e.g. `specs/001-my-feature`).
 
 ## Steps
 1. Read `$ARGUMENTS/plan.md` and `$ARGUMENTS/tasks.md` to understand the intended design.
-2. Review the code changed/added for this feature. Compare against the plan and the existing
+2. If `$ARGUMENTS/patch-notes.md` exists, read it. These are targeted fixes applied after prior
+   review failures. Consider them as intentional amendments to the plan — do not flag changes
+   that patch-notes.md explicitly requested.
+3. Review the code changed/added for this feature. Compare against the plan and the existing
    conventions of the codebase (naming, error handling, layering, tests).
-3. Flag: duplicated logic, dead code, leaky abstractions, missing error handling, and deviations
+4. Flag: duplicated logic, dead code, leaky abstractions, missing error handling, and deviations
    from the planned architecture. Prefer reuse of existing utilities over new code.
 
 ## Output

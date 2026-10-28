@@ -42,6 +42,7 @@ const kindMeta: Record<ExecutionKind, { label: string; icon: React.ReactNode }> 
   devops: { label: 'DevOps', icon: <Rocket size={12} /> },
   meeting: { label: 'Meeting', icon: <Video size={12} /> },
   preview: { label: 'Preview', icon: <MonitorPlay size={12} /> },
+  fix: { label: 'Fix', icon: <Wrench size={12} /> },
 };
 
 const devopsIcon = (category: DevOpsCategory) => {

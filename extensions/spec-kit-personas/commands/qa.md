@@ -12,10 +12,13 @@ The feature directory is: `$ARGUMENTS` (e.g. `specs/001-my-feature`).
 ## Steps
 1. Read the feature artifacts in `$ARGUMENTS/`: `spec.md`, `clarification.md` (or `clarify.md`),
    `plan.md` and `tasks.md`.
-2. Inspect the implemented code referenced by the tasks. Run the project's tests if available.
-3. Verify, requirement by requirement, that the spec's acceptance criteria are met and that every
+2. If `$ARGUMENTS/patch-notes.md` exists, read it. These are amendments applied after earlier review
+   failures. Validate the implementation against the amended contract (tasks + patches), not against
+   a superseded version.
+3. Inspect the implemented code referenced by the tasks. Run the project's tests if available.
+4. Verify, requirement by requirement, that the spec's acceptance criteria are met and that every
    task in `tasks.md` is actually implemented (not just checked off).
-4. Look for missing edge cases, untested behavior, and acceptance criteria that are unmet.
+5. Look for missing edge cases, untested behavior, and acceptance criteria that are unmet.
 
 ## Output
 Write your findings to `$ARGUMENTS/reviews/qa.md` with:

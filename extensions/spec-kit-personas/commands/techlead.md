@@ -13,8 +13,11 @@ The feature directory is: `$ARGUMENTS` (e.g. `specs/001-my-feature`).
 ## Steps
 1. Read the prior persona reports in `$ARGUMENTS/reviews/`: `qa.md`, `code-review.md`, `security.md`
    (any that exist) and their verdict lines.
-2. Read `$ARGUMENTS/spec.md` and `$ARGUMENTS/tasks.md` to confirm scope and completeness at a high level.
-3. Weigh the findings: a single unresolved blocking issue (or a FAIL verdict) from any persona means
+2. If `$ARGUMENTS/patch-notes.md` exists, read it. These are amendments applied after earlier review
+   failures. Factor them into your assessment: blocking issues from prior reviews should have been
+   addressed by the patches.
+3. Read `$ARGUMENTS/spec.md` and `$ARGUMENTS/tasks.md` to confirm scope and completeness at a high level.
+4. Weigh the findings: a single unresolved blocking issue (or a FAIL verdict) from any persona means
    the feature is not ready. Note anything that should become a follow-up task.
 
 ## Output

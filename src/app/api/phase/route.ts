@@ -5,7 +5,7 @@ import { WorkflowPhase, AgentConfig, PersonaConfig } from '../../../domain/model
 
 export async function POST(req: Request) {
   try {
-    const { action, phase, featureName, agentConfig, prompt, text, cols, rows, personaId, personas } = await req.json();
+    const { action, phase, featureName, agentConfig, prompt, text, cols, rows, personaId, personas, fixInstruction, failedPersonaId } = await req.json();
 
     if (!action || !phase) {
       return NextResponse.json({ error: 'Missing action or phase' }, { status: 400 });
@@ -43,7 +43,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ success });
     }
 
-    if (action === 'run' || action === 'run-gate' || action === 'quick-build') {
+    if (action === 'run' || action === 'run-gate' || action === 'quick-build' || action === 'fix') {
       const encoder = new TextEncoder();
       const customReadableStream = new ReadableStream({
         async start(controller) {
@@ -62,7 +62,17 @@ export async function POST(req: Request) {
 
           try {
             const onData = (t: string) => sendEvent('log', { text: t });
-            const finalState = action === 'quick-build'
+            const finalState = action === 'fix'
+              ? await workflowService.runFix(
+                  workspacePath,
+                  featureName,
+                  failedPersonaId,
+                  fixInstruction,
+                  agentConfig as AgentConfig,
+                  (personas ?? []) as PersonaConfig[],
+                  onData
+                )
+              : action === 'quick-build'
               ? await workflowService.quickBuild(workspacePath, featureName, agentConfig as AgentConfig, (personas ?? []) as PersonaConfig[], onData)
               : action === 'run-gate'
               ? await workflowService.runImplementationGate(

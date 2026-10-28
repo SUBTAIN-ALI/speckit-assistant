@@ -21,6 +21,15 @@ export interface WorkflowUseCases {
     personas: PersonaConfig[],
     onData?: (text: string) => void
   ): Promise<WorkflowState>;
+  runFix(
+    workspacePath: string,
+    featureName: string,
+    failedPersonaId: PersonaId,
+    fixInstruction: string,
+    agentConfig: AgentConfig,
+    personas: PersonaConfig[],
+    onData?: (text: string) => void
+  ): Promise<WorkflowState>;
   approvePhase(workspacePath: string, phase: WorkflowPhase, featureName: string | null): Promise<WorkflowState>;
   markStale(workspacePath: string, phase: WorkflowPhase, featureName: string): Promise<WorkflowState>;
   discardPhase(workspacePath: string, phase: WorkflowPhase, featureName: string | null): Promise<WorkflowState>;

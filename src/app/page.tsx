@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
 
 const TerminalPanel = dynamic(() => import('@/components/TerminalPanel'), {
@@ -116,6 +116,10 @@ export default function Dashboard() {
   const [running, setRunning] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<'editor' | 'console' | 'terminal' | 'preview'>('editor');
   const [runningPhase, setRunningPhase] = useState<{ phase: WorkflowPhase; featureName: string | null } | null>(null);
+  // Remembers the phase that just finished so the user can type a follow-up
+  // reply in the console and re-run the same phase with their input as context.
+  const [lastPhase, setLastPhase] = useState<{ phase: WorkflowPhase; featureName: string | null } | null>(null);
+  const replyBuf = useRef('');
   const [isEditorMaximized, setIsEditorMaximized] = useState<boolean>(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
 
@@ -613,6 +617,9 @@ export default function Dashboard() {
             }
           }
           setRunning(false);
+          setLastPhase({ phase, featureName: featureName || data.state.activeFeatureName });
+          replyBuf.current = '';
+          agentConsoleRef.current?.write('\r\n\x1b[36m  Reply to continue (Enter to send):\x1b[0m ');
           setRunningPhase(null);
           setPrompt('');
         } else if (line.startsWith('event: error')) {
@@ -662,6 +669,8 @@ export default function Dashboard() {
   const handleRunPhase = async (phase: WorkflowPhase, featureName: string | null, promptOverride?: string) => {
     agentConsoleRef.current?.clear();
     setRunning(true);
+    setLastPhase(null);
+    replyBuf.current = '';
     setActiveTab('console');
     setRunningPhase({ phase, featureName: featureName || state?.activeFeatureName || null });
 
@@ -717,6 +726,35 @@ export default function Dashboard() {
     }
   };
 
+  // Targeted fix: runs a minimal fix agent for the failed persona, then scoped re-review.
+  const handleFixAndRetry = async (featureName: string, failedPersonaId: PersonaId, fixInstruction: string) => {
+    agentConsoleRef.current?.clear();
+    setRunning(true);
+    setActiveTab('console');
+    setRunningPhase({ phase: 'implementation', featureName });
+
+    try {
+      const response = await fetch('/api/phase', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'fix',
+          phase: 'implementation',
+          featureName,
+          failedPersonaId,
+          fixInstruction,
+          agentConfig,
+          personas: personaConfigs,
+        })
+      });
+      await consumePhaseStream(response, 'implementation', featureName);
+    } catch (err: any) {
+      agentConsoleRef.current?.write(`\r\n\x1b[31mFix failed: ${err.message}\x1b[0m\r\n`);
+      setRunning(false);
+      setRunningPhase(null);
+    }
+  };
+
   // The persona currently executing (if any), so terminal input/resize is routed
   // to its PTY rather than the implement step's.
   const activePersonaId = (): PersonaId | undefined => {
@@ -728,19 +766,43 @@ export default function Dashboard() {
 
   // Forward raw terminal keystrokes to the running agent's PTY so interactive
   // prompts (e.g. the clarify Q&A picker) can be navigated with arrow keys.
+  // When no phase is running but one just finished, buffer keystrokes as a
+  // reply — pressing Enter re-runs the phase with the typed text as context.
   const handleAgentInput = (data: string) => {
-    if (!runningPhase) return;
-    fetch('/api/phase', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        action: 'input',
-        phase: runningPhase.phase,
-        featureName: runningPhase.featureName,
-        text: data,
-        personaId: activePersonaId()
-      })
-    }).catch((err) => console.error('Failed to send input:', err));
+    if (runningPhase) {
+      fetch('/api/phase', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'input',
+          phase: runningPhase.phase,
+          featureName: runningPhase.featureName,
+          text: data,
+          personaId: activePersonaId()
+        })
+      }).catch((err) => console.error('Failed to send input:', err));
+      return;
+    }
+
+    if (!lastPhase) return;
+
+    if (data === '\r' || data === '\n') {
+      const reply = replyBuf.current.trim();
+      if (!reply) return;
+      agentConsoleRef.current?.write('\r\n');
+      replyBuf.current = '';
+      const { phase, featureName } = lastPhase;
+      setLastPhase(null);
+      handleRunPhase(phase, featureName, reply);
+    } else if (data === '\x7f' || data === '\b') {
+      if (replyBuf.current.length > 0) {
+        replyBuf.current = replyBuf.current.slice(0, -1);
+        agentConsoleRef.current?.write('\b \b');
+      }
+    } else if (data >= ' ') {
+      replyBuf.current += data;
+      agentConsoleRef.current?.write(data);
+    }
   };
 
   // Keep the backend PTY sized to the visible terminal so wrapping and
@@ -1255,6 +1317,7 @@ export default function Dashboard() {
                       onFinishPhase={handleFinishPhase}
                       onAnswerPhase={(phase, feature, answer) => handleRunPhase(phase, feature, answer)}
                       onQuickBuild={handleQuickBuild}
+                      onFixAndRetry={handleFixAndRetry}
                       onPreview={async (feature) => {
                         if (state?.activeFeatureName !== feature) await handleSelectFeature(feature);
                         setActiveTab('preview');
