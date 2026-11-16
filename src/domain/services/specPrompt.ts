@@ -1,4 +1,6 @@
 import { Requirement, RequirementsMeta, featureRequirementsPath } from '../models/requirements';
+import { UserExpertiseProfile } from '../models/types';
+import { specExpertiseAddon, withExpertiseAddon } from './expertisePrompt';
 import { formatSource } from './requirementsMarkdown';
 
 // Context placed before `/speckit.specify specs/<feature>` when a feature is
@@ -26,8 +28,9 @@ export function buildSpecPrompt(opts: {
   summary?: string;
   meta: RequirementsMeta;
   requirements: Requirement[];
+  expertiseProfile?: UserExpertiseProfile;
 }): string {
-  const { feature, title, summary, meta, requirements } = opts;
+  const { feature, title, summary, meta, requirements, expertiseProfile } = opts;
   const decided = requirements.filter(r => !OPEN_TYPES.has(r.type));
   const open = requirements.filter(r => OPEN_TYPES.has(r.type));
   const meeting = [meta.meetingTopic || meta.title, meta.meetingDate].filter(Boolean).join(', ');
@@ -51,5 +54,5 @@ export function buildSpecPrompt(opts: {
     ...(open.length ? ['', 'Open questions and assumptions:', ...open.map(formatRequirement)] : []),
     '</requirements>',
   ];
-  return parts.join('\n');
+  return withExpertiseAddon(parts.join('\n'), specExpertiseAddon(expertiseProfile));
 }

@@ -147,11 +147,18 @@ export const RequirementsSection: React.FC<Props> = ({ agentConfig, agentLabel, 
   // Who extracts and groups: the active agent (meetings extension) or the
   // direct API. null = not ready yet (the status panel says why).
   const agentMode = readiness?.engine !== 'direct';
+  const directReady = readiness?.direct?.ready === true;
+  const directLabel = view && view.llm.configured[view.llm.provider]
+    ? `${LLM_PROVIDER_LABELS[view.llm.provider]} · ${view.llm.models[view.llm.provider]}`
+    : null;
+  // In agent mode, fall back to the direct label when the extension isn't
+  // installed but the user has an API key — the backend falls through to
+  // importDirect automatically.
   const llmLabel = agentMode
-    ? (readiness && readiness.agent.uploadProblems.length === 0 ? `${readiness.agentLabel ?? agentLabel} (agent)` : null)
-    : (view && view.llm.configured[view.llm.provider]
-      ? `${LLM_PROVIDER_LABELS[view.llm.provider]} · ${view.llm.models[view.llm.provider]}`
-      : null);
+    ? (readiness && readiness.agent.uploadProblems.length === 0
+      ? `${readiness.agentLabel ?? agentLabel} (agent)`
+      : (directReady ? `${directLabel} (direct)` : null))
+    : directLabel;
   const zoomReady = !!view?.zoom.connected && (!agentMode || (readiness?.agent.zoomProblems.length ?? 1) === 0);
   const setUpSpecKit = async () => {
     setSettingUp(true);
@@ -190,7 +197,8 @@ export const RequirementsSection: React.FC<Props> = ({ agentConfig, agentLabel, 
     if (!p) return null;
     const target = fixTarget(p);
     const name = target === 'mcp' ? 'MCP Tools' : target === 'agents' ? 'Agents' : 'Extensions';
-    return { message: p, action: target && onNavigate ? { label: `Open ${name}`, onClick: () => { setImportOpen(false); onNavigate(target); } } : undefined };
+    const hint = !directReady ? ' Or add an AI provider key in Settings to import directly.' : '';
+    return { message: `${p}${hint}`, action: target && onNavigate ? { label: `Open ${name}`, onClick: () => { setImportOpen(false); onNavigate(target); } } : undefined };
   })();
   const problems = agentMode && readiness
     ? [...new Set([...readiness.agent.uploadProblems, ...readiness.agent.zoomProblems])]

@@ -1,6 +1,6 @@
 import React from 'react';
 import { WorkflowState, FeatureWorkflow, WorkflowPhase, PhaseState, PersonaState, PersonaId, isPhaseDone } from '../domain/models/types';
-import { Play, Check, RotateCcw, AlertTriangle, CheckCircle2, ChevronRight, Trash2, ShieldCheck, ChevronDown, ChevronUp, ShieldAlert, Info, X, MonitorPlay, Zap } from 'lucide-react';
+import { Play, Check, RotateCcw, AlertTriangle, CheckCircle2, ChevronRight, Trash2, ShieldCheck, ChevronDown, ChevronUp, ShieldAlert, Info, X, MonitorPlay, Zap, Globe } from 'lucide-react';
 
 type KanbanBoardProps = {
   state: WorkflowState;
@@ -24,6 +24,7 @@ type KanbanBoardProps = {
   onQuickBuild?: (featureName: string) => void;
   // Fix & Retry: targeted fix for a failed review persona.
   onFixAndRetry?: (featureName: string, failedPersonaId: PersonaId, fixInstruction: string) => void;
+  onBrowserTest?: (featureName: string) => void;
 };
 
 // What "Yes, proceed" tells an agent that stopped to ask before building.
@@ -100,7 +101,8 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
   onPreview,
   onAnswerPhase,
   onQuickBuild,
-  onFixAndRetry
+  onFixAndRetry,
+  onBrowserTest
 }) => {
   const [answers, setAnswers] = React.useState<Record<string, string>>({});
   const [fixInputs, setFixInputs] = React.useState<Record<string, string>>({});
@@ -640,6 +642,19 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                               className="flex items-center gap-0.5 p-1 px-2 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900 text-[10px] font-semibold rounded transition"
                             >
                               <MonitorPlay size={9} /> Preview
+                            </button>
+                          )}
+
+                          {onBrowserTest && (colKey === 'completed' || (colKey === 'implementation' && ['awaiting_review', 'approved'].includes(activePhaseState.status))) && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onBrowserTest(feature.name);
+                              }}
+                              title="Run acceptance tests in the browser using Chrome extension"
+                              className="flex items-center gap-0.5 p-1 px-2 border border-teal-300 dark:border-teal-700 hover:bg-teal-50 dark:hover:bg-teal-900/30 text-teal-700 dark:text-teal-400 text-[10px] font-semibold rounded transition"
+                            >
+                              <Globe size={9} /> Test in Browser
                             </button>
                           )}
 

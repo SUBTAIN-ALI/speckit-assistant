@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import {
   Activity, Rocket, Radar, Wrench, Loader2, CheckCircle2, XCircle,
-  Layers, ShieldCheck, X, FileText, List, Share2, Maximize2, Minimize2, Video, MonitorPlay,
+  Layers, ShieldCheck, X, FileText, List, Share2, Maximize2, Minimize2, Video, MonitorPlay, Globe,
 } from 'lucide-react';
 import { WorkflowState } from '../domain/models/types';
 import { ExecutionRecord, ExecutionKind, ExecutionStatus } from '../domain/models/executions';
@@ -43,6 +43,7 @@ const kindMeta: Record<ExecutionKind, { label: string; icon: React.ReactNode }> 
   meeting: { label: 'Meeting', icon: <Video size={12} /> },
   preview: { label: 'Preview', icon: <MonitorPlay size={12} /> },
   fix: { label: 'Fix', icon: <Wrench size={12} /> },
+  'browser-test': { label: 'Browser Test', icon: <Globe size={12} /> },
 };
 
 const devopsIcon = (category: DevOpsCategory) => {

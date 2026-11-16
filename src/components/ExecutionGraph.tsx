@@ -41,8 +41,9 @@ const KIND_HEX: Record<ExecutionKind, string> = {
   meeting: '#10b981', // emerald
   preview: '#f59e0b', // amber
   fix: '#f97316',     // orange
+  'browser-test': '#14b8a6', // teal
 };
-const KIND_LABEL: Record<ExecutionKind, string> = { phase: 'Phase', persona: 'Persona', devops: 'DevOps', meeting: 'Meeting', preview: 'Preview', fix: 'Fix' };
+const KIND_LABEL: Record<ExecutionKind, string> = { phase: 'Phase', persona: 'Persona', devops: 'DevOps', meeting: 'Meeting', preview: 'Preview', fix: 'Fix', 'browser-test': 'Browser Test' };
 
 const radiusFor = (runs: number) => 16 + Math.min(22, Math.sqrt(runs) * 6);
 const FEATURE_HEX = '#71717a'; // zinc-500

@@ -22,6 +22,8 @@ import { MeetingAgentRunner } from '../domain/services/MeetingAgentRunner';
 import { ZOOM_TOKEN_ENV } from '../domain/models/mcp';
 import { ProcessPreviewRunner } from './secondary/preview/ProcessPreviewRunner';
 import { PreviewService } from '../domain/services/PreviewService';
+import { ChatService } from '../domain/services/chat/ChatService';
+import { createChatLlmClient } from './secondary/llm/chat';
 
 const workspaceRepo = new FSWorkspaceRepository();
 const credentialStore = new FSCredentialStore();
@@ -80,3 +82,6 @@ export const featureCreationService = new FeatureCreationService(
 const globalForPreview = globalThis as unknown as { speckitPreviewServers?: Map<string, any> };
 const previewRunner = new ProcessPreviewRunner(undefined, undefined, globalForPreview.speckitPreviewServers ??= new Map());
 export const previewService = new PreviewService(workspaceRepo, previewRunner, agentRunner, agentRepository, executionHistory);
+
+// Project domain chatbot (read-only, isolated)
+export const chatService = new ChatService(workspaceRepo, createChatLlmClient, () => integrationsService.resolveKey());

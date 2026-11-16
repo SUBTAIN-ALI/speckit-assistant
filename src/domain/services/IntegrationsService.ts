@@ -183,6 +183,15 @@ export class IntegrationsService {
     return { client: this.llmFactory(p, key, model), provider: p, model };
   }
 
+  // The active provider + key + model, without creating an LlmClient.
+  async resolveKey(provider?: LlmProvider): Promise<{ provider: LlmProvider; apiKey: string; model: string }> {
+    const creds = await this.store.load();
+    const p = provider ?? this.activeProvider(creds);
+    const key = this.keyFor(creds, p);
+    if (!key) throw new NotConfiguredError(`Add an API key for ${p === 'openai' ? 'OpenAI' : p === 'anthropic' ? 'Anthropic' : 'Google Gemini'} in Settings first.`);
+    return { provider: p, apiKey: key, model: this.modelFor(creds, p) };
+  }
+
   // Speech-to-text always uses OpenAI, whichever provider extracts requirements.
   async openAiKey(): Promise<string> {
     const key = this.keyFor(await this.store.load(), 'openai');

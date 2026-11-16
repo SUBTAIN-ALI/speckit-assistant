@@ -1,3 +1,6 @@
+import { UserExpertiseProfile } from '../models/types';
+import { implementationExpertiseAddon, planningExpertiseAddon, withExpertiseAddon } from './expertisePrompt';
+
 // Quick build: the user goes from an approved spec straight to code, skipping
 // Clarify → Tasks. The agent understands the feature and the existing project
 // itself, keeps Spec Kit's structure (a tasks.md), and never waits for answers.
@@ -12,13 +15,14 @@ If the project has no code yet, take the stack from .specify/memory/constitution
 Build only what the spec asks for.`;
 
 // The feature already has tasks.md: /speckit.implement follows it; this goes before the command.
-export function quickBuildContext(): string {
-  return `${NO_QUESTIONS}\n\n${UNDERSTAND_PROJECT}`;
+export function quickBuildContext(expertiseProfile?: UserExpertiseProfile): string {
+  const base = `${NO_QUESTIONS}\n\n${UNDERSTAND_PROJECT}`;
+  return withExpertiseAddon(base, implementationExpertiseAddon(expertiseProfile));
 }
 
 // No tasks.md yet: the agent writes one (Spec Kit's template), then implements it.
-export function quickBuildInstruction(feature: string): string {
-  return `Quick build of the feature in specs/${feature}/: implement it now.
+export function quickBuildInstruction(feature: string, expertiseProfile?: UserExpertiseProfile): string {
+  const base = `Quick build of the feature in specs/${feature}/: implement it now.
 
 1. Read every document the feature has in specs/${feature}/ (spec.md, and plan.md, research.md, data-model.md, contracts/, quickstart.md, checklists/ if they exist) and .specify/memory/constitution.md.
 
@@ -33,4 +37,5 @@ export function quickBuildInstruction(feature: string): string {
 5. ${NO_QUESTIONS}
 
 Finish with a short report: what you built, the assumptions, and anything the user must do (e.g. env values).`;
+  return withExpertiseAddon(base, implementationExpertiseAddon(expertiseProfile));
 }

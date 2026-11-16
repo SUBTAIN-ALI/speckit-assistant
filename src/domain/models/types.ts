@@ -102,6 +102,49 @@ export type WorkflowState = {
   constitutionPhase: PhaseState;
   features: FeatureWorkflow[];
   activeFeatureName: string | null;
+  expertiseProfile?: UserExpertiseProfile;
+};
+
+export type TechnicalLevel = 'technical' | 'non-technical';
+export type DomainKnowledge = 'has-domain' | 'no-domain';
+
+export type ExpertiseMode =
+  | 'power-user'      // technical + has domain knowledge
+  | 'domain-transfer' // technical + no domain knowledge
+  | 'tech-shield'     // non-technical + has domain knowledge
+  | 'full-guidance';  // non-technical + no domain knowledge
+
+export type UserExpertiseProfile = {
+  technicalLevel: TechnicalLevel;
+  domainKnowledge: DomainKnowledge;
+  domainContext?: string; // e.g. "healthcare billing", "e-commerce logistics"
+  mode: ExpertiseMode;
+};
+
+export function resolveExpertiseMode(technical: TechnicalLevel, domain: DomainKnowledge): ExpertiseMode {
+  if (technical === 'technical' && domain === 'has-domain') return 'power-user';
+  if (technical === 'technical' && domain === 'no-domain') return 'domain-transfer';
+  if (technical === 'non-technical' && domain === 'has-domain') return 'tech-shield';
+  return 'full-guidance';
+}
+
+export function buildExpertiseProfile(
+  technicalLevel: TechnicalLevel,
+  domainKnowledge: DomainKnowledge,
+  domainContext?: string
+): UserExpertiseProfile {
+  return {
+    technicalLevel,
+    domainKnowledge,
+    domainContext,
+    mode: resolveExpertiseMode(technicalLevel, domainKnowledge),
+  };
+}
+
+export const DEFAULT_EXPERTISE_PROFILE: UserExpertiseProfile = {
+  technicalLevel: 'technical',
+  domainKnowledge: 'has-domain',
+  mode: 'power-user',
 };
 
 export type AgentType = 'claude' | 'gemini' | 'copilot' | 'openai' | 'custom';

@@ -16,7 +16,8 @@ import {
   PersonaConfig,
   PersonaId,
   PhaseState,
-  isPhaseDone
+  isPhaseDone,
+  UserExpertiseProfile,
 } from '@/domain/models/types';
 import { DEFAULT_PERSONAS } from '@/domain/models/personas';
 import KanbanBoard from '@/components/KanbanBoard';
@@ -29,10 +30,14 @@ import AgentsPanel from '@/components/AgentsPanel';
 import McpPanel from '@/components/McpPanel';
 import ExtensionsPanel, { type ExtensionAction } from '@/components/ExtensionsPanel';
 import AboutModal, { APP_VERSION } from '@/components/AboutModal';
+import ExpertiseAssessmentModal from '@/components/ExpertiseAssessmentModal';
+import ChromeExtensionGuideModal from '@/components/ChromeExtensionGuideModal';
+import { BrowserTestStatus, BrowserTestResult } from '@/domain/models/browserTest';
 import ExecutionsView from '@/components/ExecutionsView';
 import RequirementsSection from '@/components/RequirementsSection';
 import WorkspaceSwitcher from '@/components/WorkspaceSwitcher';
 import PreviewPanel from '@/components/PreviewPanel';
+import ChatPanel from '@/chatbot/components/ChatPanel';
 import { isWorkflowState } from '@/lib/workflowState';
 import { AgentsFile, DEFAULT_AGENTS, toAgentConfig, activeAgent } from '@/domain/models/agents';
 import { McpFile, DEFAULT_MCP } from '@/domain/models/mcp';
@@ -61,7 +66,8 @@ import {
   Plug,
   Package,
   Activity,
-  ClipboardList
+  ClipboardList,
+  MessageSquare
 } from 'lucide-react';
 
 const PHASE_LABELS: Record<WorkflowPhase, string> = {
@@ -112,9 +118,14 @@ export default function Dashboard() {
   const [editingPersona, setEditingPersona] = useState<PersonaConfig | null>(null);
   const [auditingFeature, setAuditingFeature] = useState<{ name: string; phaseState: PhaseState } | null>(null);
   const [showAbout, setShowAbout] = useState<boolean>(false);
+  const [showExpertiseAssessment, setShowExpertiseAssessment] = useState<boolean>(false);
+  const [browserTestFeature, setBrowserTestFeature] = useState<string | null>(null);
+  const [browserTestStatus, setBrowserTestStatus] = useState<BrowserTestStatus | null>(null);
+  const [browserTestResult, setBrowserTestResult] = useState<BrowserTestResult | null>(null);
   const [newFeatureName, setNewFeatureName] = useState<string>('');
   const [running, setRunning] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<'editor' | 'console' | 'terminal' | 'preview'>('editor');
+  const [chatOpen, setChatOpen] = useState(false);
   const [runningPhase, setRunningPhase] = useState<{ phase: WorkflowPhase; featureName: string | null } | null>(null);
   // Remembers the phase that just finished so the user can type a follow-up
   // reply in the console and re-run the same phase with their input as context.
@@ -202,6 +213,9 @@ export default function Dashboard() {
       const res = await fetch('/api/state');
       const data = await res.json();
       setState(data);
+      if (data && !data.expertiseProfile) {
+        setShowExpertiseAssessment(true);
+      }
     } catch (err) {
       console.error('Failed to fetch state:', err);
     }
@@ -456,6 +470,65 @@ export default function Dashboard() {
     } else {
       root.classList.remove('dark');
       setTheme('light');
+    }
+  };
+
+  const handleSaveExpertise = async (profile: UserExpertiseProfile) => {
+    try {
+      await fetch('/api/expertise', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(profile),
+      });
+      setShowExpertiseAssessment(false);
+      fetchState();
+    } catch (err) {
+      console.error('Failed to save expertise profile:', err);
+    }
+  };
+
+  const handleBrowserTest = async (serverUrl: string) => {
+    if (!browserTestFeature) return;
+    setBrowserTestStatus('checking-chrome');
+    setBrowserTestResult(null);
+    try {
+      const res = await fetch('/api/browser-test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          featureName: browserTestFeature,
+          agentConfig,
+          config: { serverUrl },
+        }),
+      });
+      const reader = res.body?.getReader();
+      if (!reader) return;
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value);
+        const messages = buffer.split('\n\n');
+        buffer = messages.pop() || '';
+        for (const msg of messages) {
+          const dataLine = msg.split('\n').find(l => l.startsWith('data: '));
+          if (!dataLine) continue;
+          const parsed = JSON.parse(dataLine.substring(6));
+          if (msg.startsWith('event: status')) {
+            setBrowserTestStatus(parsed.status);
+          } else if (msg.startsWith('event: done')) {
+            setBrowserTestResult(parsed);
+            setBrowserTestStatus(parsed.status);
+          } else if (msg.startsWith('event: error')) {
+            setBrowserTestResult({ featureName: browserTestFeature, status: 'failed', startedAt: Date.now(), serverUrl, criteria: [], summary: parsed.message });
+            setBrowserTestStatus('failed');
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Browser test failed:', err);
+      setBrowserTestStatus('failed');
     }
   };
 
@@ -1092,6 +1165,25 @@ export default function Dashboard() {
             </>
           )}
 
+          {/* Expertise Profile Badge */}
+          <button
+            onClick={() => setShowExpertiseAssessment(true)}
+            className="flex items-center gap-1.5 px-2 py-1.5 border border-zinc-200 dark:border-zinc-800 rounded-lg text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 transition hover:bg-zinc-100 dark:hover:bg-zinc-900 text-[11px]"
+            title="Change expertise profile"
+          >
+            <span className={`w-2 h-2 rounded-full ${
+              !state?.expertiseProfile || state.expertiseProfile.mode === 'power-user' ? 'bg-green-500' :
+              state.expertiseProfile.mode === 'domain-transfer' ? 'bg-blue-500' :
+              state.expertiseProfile.mode === 'tech-shield' ? 'bg-amber-500' : 'bg-purple-500'
+            }`} />
+            <span className="hidden sm:inline font-medium">
+              {!state?.expertiseProfile ? 'Set Profile' :
+                state.expertiseProfile.mode === 'power-user' ? 'Power User' :
+                state.expertiseProfile.mode === 'domain-transfer' ? 'Domain Transfer' :
+                state.expertiseProfile.mode === 'tech-shield' ? 'Business-Friendly' : 'Full Guidance'}
+            </span>
+          </button>
+
           {/* Theme Switcher */}
           <button
             onClick={handleToggleTheme}
@@ -1318,6 +1410,11 @@ export default function Dashboard() {
                       onAnswerPhase={(phase, feature, answer) => handleRunPhase(phase, feature, answer)}
                       onQuickBuild={handleQuickBuild}
                       onFixAndRetry={handleFixAndRetry}
+                      onBrowserTest={(feature) => {
+                        setBrowserTestFeature(feature);
+                        setBrowserTestResult(null);
+                        setBrowserTestStatus(null);
+                      }}
                       onPreview={async (feature) => {
                         if (state?.activeFeatureName !== feature) await handleSelectFeature(feature);
                         setActiveTab('preview');
@@ -1435,6 +1532,12 @@ export default function Dashboard() {
         </div>
       </div>
       <AboutModal isOpen={showAbout} onClose={() => setShowAbout(false)} />
+      <ExpertiseAssessmentModal
+        isOpen={showExpertiseAssessment}
+        onClose={() => setShowExpertiseAssessment(false)}
+        onSave={handleSaveExpertise}
+        current={state?.expertiseProfile}
+      />
       {editingPersona && (
         <PersonaEditorModal
           isOpen={true}
@@ -1456,6 +1559,47 @@ export default function Dashboard() {
           }}
         />
       )}
+      {browserTestFeature && (
+        <ChromeExtensionGuideModal
+          isOpen={true}
+          onClose={() => setBrowserTestFeature(null)}
+          featureName={browserTestFeature}
+          onRunTest={handleBrowserTest}
+          testStatus={browserTestStatus}
+          testResult={browserTestResult}
+        />
+      )}
+
+      {/* Floating chat widget */}
+      {chatOpen && (
+        <div className="fixed bottom-20 right-6 z-50 w-[400px] h-[520px] rounded-xl shadow-2xl border border-zinc-200 dark:border-zinc-700 overflow-hidden flex flex-col bg-white dark:bg-zinc-950">
+          <div className="flex items-center justify-between px-4 py-2.5 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900">
+            <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-200 flex items-center gap-2">
+              <MessageSquare size={14} /> Project Chat
+            </span>
+            <button
+              onClick={() => setChatOpen(false)}
+              className="p-1 rounded text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition"
+            >
+              <X size={16} />
+            </button>
+          </div>
+          <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+            <ChatPanel active={chatOpen} />
+          </div>
+        </div>
+      )}
+      <button
+        onClick={() => setChatOpen(prev => !prev)}
+        className={`fixed bottom-6 right-6 z-50 w-12 h-12 rounded-full shadow-lg flex items-center justify-center transition-all ${
+          chatOpen
+            ? 'bg-zinc-700 dark:bg-zinc-300 text-white dark:text-black'
+            : 'bg-zinc-900 dark:bg-zinc-100 text-white dark:text-black hover:scale-105'
+        }`}
+        title="Project Chat"
+      >
+        {chatOpen ? <X size={20} /> : <MessageSquare size={20} />}
+      </button>
     </div>
   );
 }

@@ -14,8 +14,13 @@ import {
   PersonaRunStatus,
   CostMetadata,
   isPhaseDone,
+  UserExpertiseProfile,
 } from '../models/types';
 import { ExecutionStartInput, ExecutionStatus } from '../models/executions';
+import { BrowserTestConfig, BrowserTestResult, BrowserTestStatus } from '../models/browserTest';
+import { featureRequirementsPath } from '../models/requirements';
+import { parseRequirements } from './requirementsMarkdown';
+import { BrowserTestService } from './BrowserTestService';
 import { DevOpsAgent } from '../models/devopsAgents';
 import { orderPersonas, personaReportPath } from '../models/personas';
 import { BUNDLED_EXTENSIONS, InstalledExtension } from '../models/extensions';
@@ -98,6 +103,37 @@ export class WorkflowService implements WorkflowUseCases {
       await this.workspaceRepo.saveWorkflowState(workspacePath, state);
     }
     return state;
+  }
+
+  async setExpertiseProfile(workspacePath: string, profile: UserExpertiseProfile): Promise<WorkflowState> {
+    const state = await this.workspaceRepo.getWorkflowState(workspacePath);
+    state.expertiseProfile = profile;
+    await this.workspaceRepo.saveWorkflowState(workspacePath, state);
+    return state;
+  }
+
+  async runBrowserTest(
+    workspacePath: string,
+    featureName: string,
+    agentConfig: AgentConfig,
+    config?: BrowserTestConfig,
+    onData?: (text: string) => void,
+    onStatus?: (status: BrowserTestStatus) => void
+  ): Promise<BrowserTestResult> {
+    const state = await this.workspaceRepo.getWorkflowState(workspacePath);
+    const reqMd = await this.workspaceRepo.readFile(workspacePath, featureRequirementsPath(featureName));
+    const requirements = reqMd.trim() ? parseRequirements(reqMd).requirements : [];
+    const browserTestService = new BrowserTestService(this.workspaceRepo, this.agentRunner, this.executionHistory);
+    return browserTestService.runBrowserTest(
+      workspacePath,
+      featureName,
+      requirements,
+      agentConfig,
+      config,
+      state.expertiseProfile,
+      onData,
+      onStatus
+    );
   }
 
   async runPhase(
@@ -577,9 +613,10 @@ export class WorkflowService implements WorkflowUseCases {
     await this.workspaceRepo.saveWorkflowState(workspacePath, state);
 
     const hasTasks = !!feature.phases.find(p => p.phase === 'tasks')?.filePath;
+    const profile = state.expertiseProfile;
     return hasTasks
-      ? this.runPhase(workspacePath, 'implementation', featureName, agentConfig, quickBuildContext(), onData, personas)
-      : this.runPhase(workspacePath, 'implementation', featureName, agentConfig, undefined, onData, personas, { instruction: quickBuildInstruction(featureName) });
+      ? this.runPhase(workspacePath, 'implementation', featureName, agentConfig, quickBuildContext(profile), onData, personas)
+      : this.runPhase(workspacePath, 'implementation', featureName, agentConfig, undefined, onData, personas, { instruction: quickBuildInstruction(featureName, profile) });
   }
 
   // Ends an interactive phase the user is done with (Clarify stays at its prompt

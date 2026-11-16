@@ -1,6 +1,6 @@
 import { ImportProgress, ImportStatus, MeetingSnapshot } from '../models/meeting';
 import { MEETINGS_DIR, RequirementsDoc, setDir } from '../models/requirements';
-import { CostMetadata } from '../models/types';
+import { CostMetadata, UserExpertiseProfile } from '../models/types';
 import { ExecutionHistoryPort } from '../ports/out/ExecutionHistoryPort';
 import { LlmClient, LlmError } from '../ports/out/LlmPort';
 import { MeetingSourceError, MeetingSourcePort } from '../ports/out/MeetingSourcePort';
@@ -13,7 +13,7 @@ import {
   mergeExtractions,
   validateExtraction,
 } from './extraction';
-import { EXTRACTION_SYSTEM_PROMPT, MAX_TRANSCRIPT_CHARS, buildExtractionUserMessage } from './extractionPrompt';
+import { EXTRACTION_SYSTEM_PROMPT, MAX_TRANSCRIPT_CHARS, buildExtractionUserMessage, buildExtractionSystemPrompt } from './extractionPrompt';
 import { IntegrationsService, NotConfiguredError } from './IntegrationsService';
 import { RequirementsService } from './RequirementsService';
 import { chunkTranscript, normalizeTranscript } from './transcript';
@@ -46,9 +46,10 @@ export type ImportRequest = {
   workspacePath: string;
   input: ImportInput;
   title?: string; // name for the new set; defaults to the meeting topic / file name
+  expertiseProfile?: UserExpertiseProfile;
 };
 
-type TextRequest = Omit<ImportRequest, 'input'> & { input: TextInput };
+type TextRequest = Omit<ImportRequest, 'input'> & { input: TextInput; expertiseProfile?: UserExpertiseProfile };
 
 export type ImportOutcome = {
   status: ImportStatus;
@@ -92,9 +93,20 @@ export class MeetingImportService {
     } else {
       text = { ...req, input: req.input };
     }
-    const outcome = this.agent && (await this.integrations.getEngine()) === 'agent'
-      ? await this.importWithAgent(this.agent, text, onProgress)
-      : await this.importDirect(text, onProgress);
+    let outcome: ImportOutcome;
+    if (this.agent && (await this.integrations.getEngine()) === 'agent') {
+      outcome = await this.importWithAgent(this.agent, text, onProgress);
+      // Fall back to direct mode when the agent can't run (e.g. extension not
+      // installed) but an API key is available.
+      if (outcome.status === 'not_configured') {
+        try {
+          await this.integrations.resolveLlm();
+          outcome = await this.importDirect(text, onProgress);
+        } catch { /* no key either — keep the agent error */ }
+      }
+    } else {
+      outcome = await this.importDirect(text, onProgress);
+    }
     if (transcribed && outcome.status === 'ok') {
       outcome.message = `${transcribed.note} ${outcome.message}`;
       if (outcome.cost?.costUSD !== undefined) outcome.cost = { ...outcome.cost, costUSD: outcome.cost.costUSD + transcribed.costUSD };
@@ -398,7 +410,7 @@ export class MeetingImportService {
           ? `Extracting requirements with ${llm.model} (part ${i + 1} of ${chunks.length})…`
           : `Extracting requirements with ${llm.model}…`);
         const snapForPrompt = snapshot.transcript ? snapshot : { ...snapshot, summary: undefined };
-        const result = await this.extractChunk(llm.client, buildExtractionUserMessage(snapForPrompt, chunks[i], { index: i, total: chunks.length }));
+        const result = await this.extractChunk(llm.client, buildExtractionUserMessage(snapForPrompt, chunks[i], { index: i, total: chunks.length }), req.expertiseProfile);
         inputTokens += result.inputTokens;
         outputTokens += result.outputTokens;
         model = result.model || model;
@@ -438,7 +450,7 @@ export class MeetingImportService {
   }
 
   // One extraction call, validated; on invalid output, retries once with the error.
-  private async extractChunk(client: LlmClient, user: string): Promise<{
+  private async extractChunk(client: LlmClient, user: string, expertiseProfile?: UserExpertiseProfile): Promise<{
     extraction?: Extraction; status: ImportStatus; error: string; raw: string;
     inputTokens: number; outputTokens: number; model: string;
   }> {
@@ -451,7 +463,7 @@ export class MeetingImportService {
       const prompt = attempt === 0 ? user
         : `${user}\n\nYour previous answer was rejected: ${lastError}. Return only JSON that matches the required schema.`;
       try {
-        const res = await client.completeJson({ system: EXTRACTION_SYSTEM_PROMPT, user: prompt, schemaName: EXTRACTION_SCHEMA_NAME, schema: EXTRACTION_SCHEMA as unknown as Record<string, unknown> });
+        const res = await client.completeJson({ system: buildExtractionSystemPrompt(expertiseProfile), user: prompt, schemaName: EXTRACTION_SCHEMA_NAME, schema: EXTRACTION_SCHEMA as unknown as Record<string, unknown> });
         inputTokens += res.inputTokens ?? 0;
         outputTokens += res.outputTokens ?? 0;
         model = res.model;

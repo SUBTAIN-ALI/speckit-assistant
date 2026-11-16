@@ -1,5 +1,5 @@
 import { WorkspaceRepositoryPort } from '../../../domain/ports/out/WorkspaceRepositoryPort';
-import { WorkflowState, WorkflowPhase, PhaseState, FeatureWorkflow, PhaseStatus } from '../../../domain/models/types';
+import { WorkflowState, WorkflowPhase, PhaseState, FeatureWorkflow, PhaseStatus, UserExpertiseProfile } from '../../../domain/models/types';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -122,17 +122,28 @@ export class FSWorkspaceRepository implements WorkspaceRepositoryPort {
           }
         }
 
-        // Reconcile clarification (clarification.md or clarify.md).
-        // Clarification modifies spec.md rather than producing its own file,
-        // so an absent file must never reset the runtime status.
+        // Reconcile clarification. The clarify skill writes its Q&A into a
+        // "## Clarifications" section inside spec.md rather than producing its
+        // own file, so we detect completion by checking spec.md for that section.
+        // A standalone clarification.md / clarify.md is still supported as a
+        // fallback if a workspace does produce one.
         const clarifyPhase = feature.phases.find(p => p.phase === 'clarification')!;
         const clarifyPath1 = path.join(specsDir, feature.name, 'clarification.md');
         const clarifyPath2 = path.join(specsDir, feature.name, 'clarify.md');
         const finalClarifyPath = fs.existsSync(clarifyPath1) ? clarifyPath1 : (fs.existsSync(clarifyPath2) ? clarifyPath2 : null);
+        const specPath = path.join(specsDir, feature.name, 'spec.md');
+        const specHasClarifications = fs.existsSync(specPath) &&
+          /^##\s+Clarifications/m.test(fs.readFileSync(specPath, 'utf-8'));
 
         if (finalClarifyPath) {
           clarifyPhase.filePath = finalClarifyPath;
           clarifyPhase.content = fs.readFileSync(finalClarifyPath, 'utf-8');
+          if (clarifyPhase.status === 'idle') {
+            clarifyPhase.status = 'awaiting_review';
+          }
+        } else if (specHasClarifications) {
+          clarifyPhase.filePath = specPath;
+          clarifyPhase.content = null;
           if (clarifyPhase.status === 'idle') {
             clarifyPhase.status = 'awaiting_review';
           }
@@ -187,6 +198,7 @@ export class FSWorkspaceRepository implements WorkspaceRepositoryPort {
     // We only save metadata (statuses and stale flag) to file to avoid writing bloated contents.
     // Content is read dynamically from disk during reconciliation anyway.
     const minimalState = {
+      ...(state.expertiseProfile ? { expertiseProfile: state.expertiseProfile } : {}),
       constitutionPhase: {
         phase: state.constitutionPhase.phase,
         status: state.constitutionPhase.status,
@@ -410,6 +422,7 @@ export class FSWorkspaceRepository implements WorkspaceRepositoryPort {
         }));
       }
       state.activeFeatureName = data.activeFeatureName || null;
+      if (data.expertiseProfile) state.expertiseProfile = data.expertiseProfile as UserExpertiseProfile;
       return state;
     } catch {
       return null;
