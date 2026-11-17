@@ -376,7 +376,7 @@ export class FSWorkspaceRepository implements WorkspaceRepositoryPort {
   }
 
   private isUserState(status: PhaseStatus): boolean {
-    return status === 'running' || status === 'approved' || status === 'skipped';
+    return status === 'running' || status === 'approved' || status === 'skipped' || status === 'failed';
   }
 
   private loadStateFile(workspacePath: string): WorkflowState | null {

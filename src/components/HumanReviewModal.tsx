@@ -78,6 +78,7 @@ export const HumanReviewModal: React.FC<HumanReviewModalProps> = ({
   const getDeveloperStatus = (): 'idle' | 'running' | 'passed' | 'failed' => {
     if (!activePhaseState) return 'idle';
     if (activePhaseState.status === 'idle') return 'idle';
+    if (activePhaseState.status === 'failed') return 'failed';
     if (activePhaseState.status === 'running') {
       const hasGateStarted = activePhaseState.personas?.some(p => p.status !== 'idle');
       return hasGateStarted ? 'passed' : 'running';

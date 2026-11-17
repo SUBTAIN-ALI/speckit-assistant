@@ -688,18 +688,35 @@ export default function Dashboard() {
             if (activePhase?.filePath) {
               handleLoadFile(activePhase.filePath);
             }
+
+            setRunning(false);
+            setRunningPhase(null);
+            setPrompt('');
+
+            if (activePhase?.status === 'failed') {
+              const msg = activePhase.attention?.message ?? 'Phase failed.';
+              agentConsoleRef.current?.write(`\r\n\x1b[31m✗ ${msg}\x1b[0m\r\n`);
+              if (activePhase.attention?.question) {
+                agentConsoleRef.current?.write(`\r\n\x1b[33m  The agent asked: ${activePhase.attention.question}\x1b[0m\r\n`);
+              }
+              agentConsoleRef.current?.write('\r\n\x1b[36m  Type a message and press Enter to retry with context, or click Run on the card.\x1b[0m ');
+              setLastPhase({ phase, featureName: targetFeature });
+              replyBuf.current = '';
+            } else {
+              setLastPhase({ phase, featureName: targetFeature });
+              replyBuf.current = '';
+              agentConsoleRef.current?.write('\r\n\x1b[36m  Reply to continue (Enter to send):\x1b[0m ');
+            }
+          } else {
+            setRunning(false);
+            setRunningPhase(null);
           }
-          setRunning(false);
-          setLastPhase({ phase, featureName: featureName || data.state.activeFeatureName });
-          replyBuf.current = '';
-          agentConsoleRef.current?.write('\r\n\x1b[36m  Reply to continue (Enter to send):\x1b[0m ');
-          setRunningPhase(null);
-          setPrompt('');
         } else if (line.startsWith('event: error')) {
           const dataLine = line.split('\n').find(l => l.startsWith('data: '));
           if (dataLine) {
             const data = JSON.parse(dataLine.substring(6));
-            agentConsoleRef.current?.write(`\r\n\x1b[31mError: ${data.message}\x1b[0m\r\n`);
+            agentConsoleRef.current?.write(`\r\n\x1b[31m✗ Error: ${data.message}\x1b[0m\r\n`);
+            agentConsoleRef.current?.write('\r\n\x1b[36m  Fix the issue and click Run on the card to retry.\x1b[0m\r\n');
           }
           setRunning(false);
           setRunningPhase(null);

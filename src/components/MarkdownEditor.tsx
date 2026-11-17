@@ -210,6 +210,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
             if (status === 'skipped') dotColor = 'bg-zinc-400 dark:bg-zinc-500';
             if (status === 'awaiting_review') dotColor = 'bg-amber-500';
             if (status === 'running') dotColor = 'bg-blue-500 animate-pulse';
+            if (status === 'failed') dotColor = 'bg-red-500';
 
             return (
               <button

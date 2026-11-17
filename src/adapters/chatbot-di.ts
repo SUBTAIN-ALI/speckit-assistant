@@ -68,6 +68,7 @@ class SpecRabbitChatbotHost implements ChatbotHostPort {
     const donePromise = new Promise<number>(r => { resolveDone = r; });
     let stopped = false;
     const key = `chatbot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    let responseStarted = false;
 
     const exitPromise = chatbotAgentRunnerProcess.runCommand(
       workspacePath,
@@ -79,14 +80,28 @@ class SpecRabbitChatbotHost implements ChatbotHostPort {
       agentConfig,
       (text: string) => {
         const lines = text.split('\n');
-        const filtered = lines.filter(line => {
+        const filtered: string[] = [];
+
+        for (const line of lines) {
           const trimmed = line.trim();
-          if (/^\$[\d,.]+$/.test(trimmed)) return false;
-          if (/^Running:/.test(trimmed)) return false;
-          if (/^Process exited with code/.test(trimmed)) return false;
-          return true;
-        }).join('\n');
-        if (filtered) accumulated += filtered;
+
+          if (!responseStarted) {
+            if (/^▶/.test(trimmed)) responseStarted = true;
+            continue;
+          }
+
+          if (!trimmed) { filtered.push(line); continue; }
+          if (/^\$[\d,.]+$/.test(trimmed)) continue;
+          if (/^Running:/.test(trimmed)) continue;
+          if (/^Process exited with code/.test(trimmed)) continue;
+          if (/^[▶✓✗→]/.test(trimmed)) continue;
+          if (/^Done\b|^✓ Done|^✗ Finished/.test(trimmed)) continue;
+
+          filtered.push(line);
+        }
+
+        const result = filtered.join('\n');
+        if (result) accumulated += result;
       },
     );
 

@@ -407,10 +407,10 @@ export const ChatPanel: React.FC<Props> = ({ active, expanded, onExpandToggle })
             <>
               <button
                 onClick={() => setShowConvList(prev => !prev)}
-                className="flex items-center gap-1 text-sm font-medium text-zinc-700 dark:text-zinc-300 truncate hover:text-zinc-900 dark:hover:text-zinc-100 transition"
+                className="flex items-center gap-1 text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-zinc-100 transition max-w-full overflow-hidden"
               >
                 <span className="truncate">{activeTitle || 'New Conversation'}</span>
-                <ChevronDown size={14} />
+                <ChevronDown size={14} className="shrink-0" />
               </button>
               {showConvList && (
                 <div className="absolute top-full left-0 right-0 mt-1 z-50 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-lg max-h-64 overflow-y-auto">
@@ -455,14 +455,14 @@ export const ChatPanel: React.FC<Props> = ({ active, expanded, onExpandToggle })
         <button
           onClick={handleFileUpload}
           disabled={uploading}
-          className="p-1.5 rounded text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition disabled:opacity-40 disabled:cursor-not-allowed"
+          className="shrink-0 p-1.5 rounded text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition disabled:opacity-40 disabled:cursor-not-allowed"
           title="Upload document"
         >
           {uploading ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
         </button>
         <button
           onClick={startNewConversation}
-          className="p-1.5 rounded text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition"
+          className="shrink-0 p-1.5 rounded text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition"
           title="New conversation"
         >
           <Plus size={16} />

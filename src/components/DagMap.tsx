@@ -20,6 +20,7 @@ const STATUS_COLOR: Record<PhaseStatus, string> = {
   awaiting_review: '#f59e0b', // amber-500
   approved: '#10b981',      // emerald-500
   skipped: '#a1a1aa',       // zinc-400
+  failed: '#ef4444',        // red-500
 };
 
 const STATUS_LABEL: Record<PhaseStatus, string> = {
@@ -28,6 +29,7 @@ const STATUS_LABEL: Record<PhaseStatus, string> = {
   awaiting_review: 'Review',
   approved: 'Approved',
   skipped: 'Skipped',
+  failed: 'Failed',
 };
 
 const PHASE_LABELS: Record<WorkflowPhase, string> = {

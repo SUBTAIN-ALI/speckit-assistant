@@ -111,6 +111,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
 
   const getDeveloperStatus = (activePhaseState: PhaseState): 'idle' | 'running' | 'passed' | 'failed' => {
     if (activePhaseState.status === 'idle') return 'idle';
+    if (activePhaseState.status === 'failed') return 'failed';
     if (activePhaseState.status === 'running') {
       const hasGateStarted = activePhaseState.personas?.some(p => p.status !== 'idle');
       return hasGateStarted ? 'passed' : 'running';
@@ -215,6 +216,13 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
         return (
           <span className="flex items-center gap-1 text-[10px] font-semibold text-zinc-500 bg-zinc-500/10 px-1.5 py-0.5 rounded border border-zinc-500/20" title="Skipped by a quick build — you can still run it">
             SKIPPED
+          </span>
+        );
+      case 'failed':
+        return (
+          <span className="flex items-center gap-1 text-[10px] font-semibold text-red-500 bg-red-500/10 px-1.5 py-0.5 rounded border border-red-500/20">
+            <AlertTriangle size={10} />
+            FAILED
           </span>
         );
       default:
@@ -585,8 +593,16 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
 
                         {/* The last run stopped and needs the user (e.g. Implement asked a question) */}
                         {activePhaseState.attention && (
-                          <div className="mt-3 p-2 rounded-md border border-amber-500/30 bg-amber-500/10 text-[10px] leading-normal space-y-1.5" onClick={e => e.stopPropagation()}>
-                            <p className="font-semibold text-amber-800 dark:text-amber-300 flex items-start gap-1"><AlertTriangle size={11} className="mt-px shrink-0" /> {activePhaseState.attention.message}</p>
+                          <div className={`mt-3 p-2 rounded-md border text-[10px] leading-normal space-y-1.5 ${
+                            activePhaseState.status === 'failed'
+                              ? 'border-red-500/30 bg-red-500/10'
+                              : 'border-amber-500/30 bg-amber-500/10'
+                          }`} onClick={e => e.stopPropagation()}>
+                            <p className={`font-semibold flex items-start gap-1 ${
+                              activePhaseState.status === 'failed'
+                                ? 'text-red-700 dark:text-red-300'
+                                : 'text-amber-800 dark:text-amber-300'
+                            }`}><AlertTriangle size={11} className="mt-px shrink-0" /> {activePhaseState.attention.message}</p>
                             {activePhaseState.attention.question && (
                               <p className="text-zinc-700 dark:text-zinc-300">The agent asked: <em>{activePhaseState.attention.question}</em></p>
                             )}

@@ -7,7 +7,7 @@ export type AgentConfig = {
   model?: string;
 };
 
-export type PhaseStatus = 'idle' | 'running' | 'awaiting_review' | 'approved' | 'skipped';
+export type PhaseStatus = 'idle' | 'running' | 'awaiting_review' | 'approved' | 'skipped' | 'failed';
 
 export type FeatureSummary = {
   name: string;

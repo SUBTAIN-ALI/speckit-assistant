@@ -39,6 +39,18 @@ const FEATURE_PHASES: WorkflowPhase[] = [
   'implementation'
 ];
 
+const PHASE_LABELS: Partial<Record<WorkflowPhase, string>> = {
+  constitution: 'Constitution',
+  specification: 'Specification',
+  clarification: 'Clarification',
+  planning: 'Planning',
+  checklist: 'Checklist',
+  analyze: 'Analysis',
+  tasks: 'Tasks',
+  taskstoissues: 'Tasks to Issues',
+  implementation: 'Implementation',
+};
+
 export class WorkflowService implements WorkflowUseCases {
   constructor(
     private workspaceRepo: WorkspaceRepositoryPort,
@@ -193,7 +205,14 @@ export class WorkflowService implements WorkflowUseCases {
       }
 
       if (exitCode !== 0) {
-        this.setPhaseStatus(freshState, phase, targetFeature, 'idle');
+        this.setPhaseStatus(freshState, phase, targetFeature, 'failed');
+        const failedPhase = this.findPhase(freshState, phase, targetFeature);
+        if (failedPhase) {
+          failedPhase.attention = {
+            message: `${PHASE_LABELS[phase] ?? phase} failed (exit code ${exitCode}). Read the console output above for details, then click Run to retry.`,
+            ...(lastQuestion(tail) ? { question: lastQuestion(tail) } : {}),
+          };
+        }
         await this.workspaceRepo.saveWorkflowState(workspacePath, freshState);
         return freshState;
       }
@@ -236,7 +255,14 @@ export class WorkflowService implements WorkflowUseCases {
     } catch (err) {
       const freshState = await this.workspaceRepo.getWorkflowState(workspacePath);
       if (this.findPhase(freshState, phase, targetFeature)?.status !== 'running') throw err; // user already decided
-      this.setPhaseStatus(freshState, phase, targetFeature, 'idle');
+      this.setPhaseStatus(freshState, phase, targetFeature, 'failed');
+      const failedPhase = this.findPhase(freshState, phase, targetFeature);
+      if (failedPhase) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        failedPhase.attention = {
+          message: `${PHASE_LABELS[phase] ?? phase} crashed: ${errMsg.slice(0, 300)}. Click Run to retry.`,
+        };
+      }
       await this.workspaceRepo.saveWorkflowState(workspacePath, freshState);
       throw err;
     }
@@ -311,15 +337,15 @@ export class WorkflowService implements WorkflowUseCases {
       await this.workspaceRepo.saveWorkflowState(workspacePath, state);
 
       if (verdict === 'failed') {
-        onData?.(`\r\n\x1b[31m✗ ${persona.label} bloqueou o gate — implementação permanece em revisão.\x1b[0m\r\n`);
+        onData?.(`\r\n\x1b[31m✗ ${persona.label} blocked the gate — implementation stays under review.\x1b[0m\r\n`);
         return state;
       }
-      onData?.(`\r\n\x1b[32m✓ ${persona.label} passou.\x1b[0m\r\n`);
+      onData?.(`\r\n\x1b[32m✓ ${persona.label} passed.\x1b[0m\r\n`);
     }
 
     implPhase.status = 'awaiting_review';
     await this.workspaceRepo.saveWorkflowState(workspacePath, state);
-    onData?.(`\r\n\x1b[32m✓ Review gate completo — pronto para aprovação.\x1b[0m\r\n`);
+    onData?.(`\r\n\x1b[32m✓ Review gate complete — ready for approval.\x1b[0m\r\n`);
     return state;
   }
 
@@ -764,7 +790,7 @@ export class WorkflowService implements WorkflowUseCases {
       const content = await this.workspaceRepo.readFile(workspacePath, tasksPhase.filePath);
       const checkboxes = [...content.matchAll(/^\s*(?:[-*]|\d+\.)\s+\[( |x|X)\]/gm)];
       if (checkboxes.length > 0 && checkboxes.every(c => c[1].toLowerCase() === 'x')) {
-        if (implPhase.status === 'running' || implPhase.status === 'idle') {
+        if (implPhase.status === 'running' || implPhase.status === 'idle' || implPhase.status === 'failed') {
           implPhase.status = 'awaiting_review';
         }
       }

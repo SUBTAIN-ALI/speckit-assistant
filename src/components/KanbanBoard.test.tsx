@@ -134,6 +134,28 @@ describe('KanbanBoard: a run that needs the user', () => {
   });
 });
 
+describe('KanbanBoard: failed phase', () => {
+  it('shows FAILED badge with red attention block and Run button', () => {
+    const state: WorkflowState = {
+      constitutionPhase: { phase: 'constitution', status: 'approved', filePath: null, content: null },
+      activeFeatureName: '003-checkout',
+      features: [{
+        name: '003-checkout',
+        phases: [
+          { phase: 'specification', status: 'failed', filePath: null, content: null, attention: { message: 'Specification failed (exit code 1). Read the console output above for details, then click Run to retry.' } },
+          ...(['clarification', 'planning', 'checklist', 'analyze', 'tasks', 'taskstoissues', 'implementation'] as const)
+            .map(p => ({ phase: p, status: 'idle' as const, filePath: null, content: null })),
+        ],
+      }],
+    };
+    const h = renderBoard(state);
+    expect(screen.getByText('FAILED')).toBeTruthy();
+    expect(screen.getByText(/Specification failed/)).toBeTruthy();
+    fireEvent.click(screen.getByText('Run'));
+    expect(h.onRunPhase).toHaveBeenCalledWith('specification', '003-checkout');
+  });
+});
+
 describe('KanbanBoard quick build', () => {
   const specInReview = (): WorkflowState => ({
     constitutionPhase: { phase: 'constitution', status: 'approved', filePath: null, content: null },

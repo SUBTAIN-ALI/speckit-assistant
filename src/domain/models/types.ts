@@ -14,7 +14,8 @@ export type PhaseStatus =
   | 'running'          // command sent, waiting for agent to generate file
   | 'awaiting_review'  // file appeared on disk / task run completed, waiting for review
   | 'approved'         // user approved, phase complete
-  | 'skipped';         // passed over by a quick build (counts as done; can still be run)
+  | 'skipped'          // passed over by a quick build (counts as done; can still be run)
+  | 'failed';          // agent exited non-zero or threw — card shows what went wrong
 
 // A phase the flow has moved past: approved, or skipped by a quick build.
 export const isPhaseDone = (status: PhaseStatus): boolean => status === 'approved' || status === 'skipped';

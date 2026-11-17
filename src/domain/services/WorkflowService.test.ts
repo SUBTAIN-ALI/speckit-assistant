@@ -153,13 +153,16 @@ describe('WorkflowService', () => {
     expect(workspaceRepo.saveWorkflowState).toHaveBeenCalled();
   });
 
-  it('should handle non-zero exit code, setting status back to idle', async () => {
+  it('should set status to failed with attention on non-zero exit code', async () => {
     agentRunner.runPhase.mockResolvedValue(1);
 
     const state = await service.runPhase('/workspace', 'specification', 'auth', { agentType: 'claude' });
     const authFeature = state.features.find(f => f.name === 'auth')!;
     const specPhase = authFeature.phases.find(p => p.phase === 'specification')!;
-    expect(specPhase.status).toBe('idle');
+    expect(specPhase.status).toBe('failed');
+    expect(specPhase.attention).toBeDefined();
+    expect(specPhase.attention!.message).toContain('Specification failed');
+    expect(specPhase.attention!.message).toContain('exit code 1');
   });
 
   it('records captured cost on the phase when the runner reports it via onCost', async () => {

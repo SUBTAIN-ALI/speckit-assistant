@@ -12,8 +12,15 @@ describe('extractFixSuggestion', () => {
     expect(extractFixSuggestion(report)).toBeUndefined();
   });
 
-  it('returns undefined when no verdict is present', () => {
-    const report = `## Summary\nSome review findings.`;
+  it('falls back to meaningful lines when no verdict is present', () => {
+    const report = `## Summary\nSome review findings that are long enough to be meaningful.`;
+    const result = extractFixSuggestion(report);
+    expect(result).toBeDefined();
+    expect(result!.failureSummary).toContain('review findings');
+  });
+
+  it('returns undefined for very short text with no verdict', () => {
+    const report = `OK`;
     expect(extractFixSuggestion(report)).toBeUndefined();
   });
 
@@ -100,5 +107,49 @@ describe('extractFixSuggestion', () => {
     const result = extractFixSuggestion(report);
     expect(result).toBeDefined();
     expect(result!.suggestedFix).toBe('The auth middleware is completely missing.');
+  });
+
+  it('extracts from a ## Findings section', () => {
+    const report = [
+      '## Findings',
+      '- The API key is hardcoded in config.ts',
+      '- No rate limiting on login endpoint',
+      '',
+      'VERDICT: FAIL',
+    ].join('\n');
+
+    const result = extractFixSuggestion(report);
+    expect(result).toBeDefined();
+    expect(result!.failureSummary).toContain('API key is hardcoded');
+    expect(result!.suggestedFix).toBe('The API key is hardcoded in config.ts');
+  });
+
+  it('extracts from numbered list items', () => {
+    const report = [
+      '## Review',
+      '1. Missing error handling in the payment flow',
+      '2. No validation on user input',
+      '',
+      'VERDICT: FAIL',
+    ].join('\n');
+
+    const result = extractFixSuggestion(report);
+    expect(result).toBeDefined();
+    expect(result!.failureSummary).toContain('Missing error handling');
+    expect(result!.suggestedFix).toBe('Missing error handling in the payment flow');
+  });
+
+  it('falls back to agent output when report is unstructured', () => {
+    const rawOutput = [
+      '\x1b[32m✓ Build passed\x1b[0m',
+      'Error: test suite "auth.test.ts" failed with 3 errors',
+      'Expected 200 but received 401 on POST /api/login',
+      'Process exited with code 1',
+    ].join('\n');
+
+    const result = extractFixSuggestion(rawOutput);
+    expect(result).toBeDefined();
+    expect(result!.failureSummary).toContain('test suite');
+    expect(result!.failureSummary).toContain('Expected 200');
   });
 });
