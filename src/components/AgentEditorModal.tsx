@@ -5,7 +5,7 @@ import { X, Save, Bot } from 'lucide-react';
 import { AgentType } from '../domain/models/types';
 import { AgentProfile } from '../domain/models/agents';
 import { McpServer } from '../domain/models/mcp';
-import { MODEL_OPTIONS } from '../domain/models/modelOptions';
+import { MODEL_GROUPS } from '../domain/models/modelOptions';
 
 type AgentEditorModalProps = {
   isOpen: boolean;
@@ -105,9 +105,17 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({ isOpen, onCl
               <label className={labelCls}>Model (for cost pricing)</label>
               <input className={input} value={model} onChange={e => setModel(e.target.value)} placeholder="e.g. claude-sonnet-4-6" list="model-options" />
               <datalist id="model-options">
-                {MODEL_OPTIONS.map(m => (
-                  <option key={m.value} value={m.value}>{m.label}</option>
-                ))}
+                {MODEL_GROUPS
+                  .filter(g => {
+                    if (agentType === 'claude') return g.provider.toLowerCase().includes('anthropic');
+                    if (agentType === 'gemini') return g.provider.toLowerCase().includes('google');
+                    if (agentType === 'openai' || agentType === 'copilot') return g.provider.toLowerCase().includes('openai');
+                    return true;
+                  })
+                  .flatMap(g => g.models)
+                  .map(m => (
+                    <option key={m.value} value={m.value}>{m.label}</option>
+                  ))}
               </datalist>
             </div>
             <div>

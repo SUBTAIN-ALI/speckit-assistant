@@ -22,16 +22,25 @@ export type AgentsFile = {
 export const DEFAULT_AGENTS: AgentsFile = {
   agents: [
     {
+      id: 'codex-default',
+      name: 'Codex (Default)',
+      agentType: 'openai',
+      model: 'gpt-6-sol',
+      enabled: true,
+      mcpServerIds: [],
+      description: 'Default OpenAI Codex CLI agent.',
+    },
+    {
       id: 'claude-default',
-      name: 'Claude (Default)',
+      name: 'Claude',
       agentType: 'claude',
       model: 'claude-sonnet-4-6',
       enabled: true,
       mcpServerIds: [],
-      description: 'Default Anthropic Claude CLI agent.',
+      description: 'Anthropic Claude CLI agent.',
     },
   ],
-  activeAgentId: 'claude-default',
+  activeAgentId: 'codex-default',
 };
 
 // Reduce a profile to the AgentConfig the runner/phase API consumes.

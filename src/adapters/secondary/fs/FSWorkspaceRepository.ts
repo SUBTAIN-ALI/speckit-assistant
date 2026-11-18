@@ -8,8 +8,8 @@ const FEATURE_PHASES: WorkflowPhase[] = [
   'clarification',
   'planning',
   'checklist',
-  'analyze',
   'tasks',
+  'analyze',
   'taskstoissues',
   'implementation'
 ];
@@ -60,8 +60,8 @@ export class FSWorkspaceRepository implements WorkspaceRepositoryPort {
         const fileMap: Array<{ file: string; phase: WorkflowPhase }> = [
           { file: 'spec.md', phase: 'specification' },
           { file: 'plan.md', phase: 'planning' },
-          { file: 'analysis.md', phase: 'analyze' },
-          { file: 'tasks.md', phase: 'tasks' }
+          { file: 'tasks.md', phase: 'tasks' },
+          { file: 'analysis.md', phase: 'analyze' }
         ];
 
         for (const { file, phase } of fileMap) {

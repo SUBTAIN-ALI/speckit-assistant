@@ -9,8 +9,8 @@ const TABS = [
   { phase: 'clarification', label: 'Clarification', file: 'clarification.md', defaultPath: (f: string) => `specs/${f}/clarification.md` },
   { phase: 'planning', label: 'Planning', file: 'plan.md', defaultPath: (f: string) => `specs/${f}/plan.md` },
   { phase: 'checklist', label: 'Checklist', file: 'checklist.md', defaultPath: (f: string) => `specs/${f}/checklist.md` },
-  { phase: 'analyze', label: 'Analysis', file: 'analysis.md', defaultPath: (f: string) => `specs/${f}/analysis.md` },
   { phase: 'tasks', label: 'Tasks', file: 'tasks.md', defaultPath: (f: string) => `specs/${f}/tasks.md` },
+  { phase: 'analyze', label: 'Analysis', file: 'analysis.md', defaultPath: (f: string) => `specs/${f}/analysis.md` },
 ] as const;
 
 type MarkdownEditorProps = {

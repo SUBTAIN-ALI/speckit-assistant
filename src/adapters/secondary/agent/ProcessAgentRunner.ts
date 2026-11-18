@@ -356,7 +356,21 @@ export class ProcessAgentRunner implements AgentRunnerPort {
         child.write("\x04");
       }
 
+      // Heartbeat: non-Claude agents (e.g. Codex) may produce no output for
+      // minutes while the model thinks. Send a periodic keepalive so the
+      // frontend's stream-timeout doesn't fire.
+      let lastDataTime = Date.now();
+      const HEARTBEAT_INTERVAL_MS = 30_000;
+      const heartbeat = agentConfig.agentType !== "claude"
+        ? setInterval(() => {
+            if (Date.now() - lastDataTime >= HEARTBEAT_INTERVAL_MS) {
+              onData?.("\x1b[2m⏳ Agent is still working…\x1b[0m\r\n");
+            }
+          }, HEARTBEAT_INTERVAL_MS)
+        : null;
+
       child.onData((data: string) => {
+        lastDataTime = Date.now();
         fullOutput += data;
         if (!stream) return onData?.(data);
         const text = stream.push(data);
@@ -364,6 +378,7 @@ export class ProcessAgentRunner implements AgentRunnerPort {
       });
 
       child.onExit(({ exitCode }: { exitCode: number }) => {
+        if (heartbeat) clearInterval(heartbeat);
         this.activeProcesses.delete(procKey);
         const rest = stream?.flush();
         if (rest) onData?.(rest);
@@ -458,12 +473,13 @@ export class ProcessAgentRunner implements AgentRunnerPort {
           cmd: cliPath,
           args: [prompt],
         };
-      case "openai":
+      case "openai": {
+        const modelArgs = config.model ? ["-m", config.model] : [];
         return {
           cmd: cliPath,
-          args: ["exec", "-"],
-          stdin: prompt,
+          args: ["exec", "--json", "--dangerously-bypass-approvals-and-sandbox", ...modelArgs, "--", prompt],
         };
+      }
       case "custom":
         if (config.customCommand) {
           const parts = config.customCommand.split(" ");

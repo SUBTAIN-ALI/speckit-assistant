@@ -22,11 +22,25 @@ export const MODEL_GROUPS: { provider: string; models: ModelOption[] }[] = [
     ],
   },
   {
-    provider: 'OpenAI',
+    provider: 'OpenAI (GPT-6)',
     models: [
+      { value: 'gpt-6-astra', label: 'GPT-6 Astra (Flagship)' },
+      { value: 'gpt-6-sol', label: 'GPT-6 Sol' },
+      { value: 'gpt-6-luna', label: 'GPT-6 Luna (Fast)' },
+      { value: 'gpt-6.1-sol', label: 'GPT-6.1 Sol' },
+      { value: 'gpt-6.2-astra', label: 'GPT-6.2 Astra' },
+      { value: 'gpt-6.2-sol', label: 'GPT-6.2 Sol' },
+    ],
+  },
+  {
+    provider: 'OpenAI (Legacy)',
+    models: [
+      { value: 'gpt-5.5', label: 'GPT-5.5' },
+      { value: 'o3', label: 'o3' },
+      { value: 'o4-mini', label: 'o4-mini' },
+      { value: 'gpt-4.1', label: 'GPT-4.1' },
       { value: 'gpt-4o', label: 'GPT-4o' },
       { value: 'gpt-4o-mini', label: 'GPT-4o mini' },
-      { value: 'gpt-4.1', label: 'GPT-4.1' },
     ],
   },
 ];

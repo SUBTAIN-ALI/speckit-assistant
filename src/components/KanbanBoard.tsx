@@ -1,6 +1,6 @@
 import React from 'react';
 import { WorkflowState, FeatureWorkflow, WorkflowPhase, PhaseState, PersonaState, PersonaId, isPhaseDone } from '../domain/models/types';
-import { Play, Check, RotateCcw, AlertTriangle, CheckCircle2, ChevronRight, Trash2, ShieldCheck, ChevronDown, ChevronUp, ShieldAlert, Info, X, MonitorPlay, Zap, Globe } from 'lucide-react';
+import { Play, Check, RotateCcw, AlertTriangle, CheckCircle2, ChevronRight, Trash2, ShieldCheck, ChevronDown, ChevronUp, ShieldAlert, Info, X, MonitorPlay, Zap, Globe, GitCommit } from 'lucide-react';
 
 type KanbanBoardProps = {
   state: WorkflowState;
@@ -25,6 +25,7 @@ type KanbanBoardProps = {
   // Fix & Retry: targeted fix for a failed review persona.
   onFixAndRetry?: (featureName: string, failedPersonaId: PersonaId, fixInstruction: string) => void;
   onBrowserTest?: (featureName: string) => void;
+  onCommit?: (featureName: string) => void;
 };
 
 // What "Yes, proceed" tells an agent that stopped to ask before building.
@@ -68,8 +69,8 @@ const PHASES: WorkflowPhase[] = [
   'clarification',
   'planning',
   'checklist',
-  'analyze',
   'tasks',
+  'analyze',
   'taskstoissues',
   'implementation'
 ];
@@ -102,7 +103,8 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
   onAnswerPhase,
   onQuickBuild,
   onFixAndRetry,
-  onBrowserTest
+  onBrowserTest,
+  onCommit
 }) => {
   const [answers, setAnswers] = React.useState<Record<string, string>>({});
   const [fixInputs, setFixInputs] = React.useState<Record<string, string>>({});
@@ -286,7 +288,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
 
       {/* Columns wrapper */}
       <div className="flex-1 flex gap-4 px-6 pb-6 overflow-x-auto min-h-0">
-        {(['specification', 'clarification', 'planning', 'checklist', 'analyze', 'tasks', 'taskstoissues', 'implementation', 'completed'] as const).map(colKey => {
+        {(['specification', 'clarification', 'planning', 'checklist', 'tasks', 'analyze', 'taskstoissues', 'implementation', 'completed'] as const).map(colKey => {
           const colFeatures = state.features.filter(f => getFeatureColumn(f) === colKey);
           
           return (
@@ -636,17 +638,19 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                         )}
 
                         {/* Interactive Phase Control buttons on cards */}
-                        <div className="mt-4 pt-3 border-t border-zinc-100 dark:border-zinc-900 flex justify-end items-center gap-1.5">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onSelectPhaseFile(activePhaseState.filePath);
-                            }}
-                            disabled={!activePhaseState.filePath}
-                            className="mr-auto text-[10px] hover:underline text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 disabled:opacity-0"
-                          >
-                            Open File
-                          </button>
+                        <div className="mt-4 pt-3 border-t border-zinc-100 dark:border-zinc-900 flex flex-wrap items-center gap-1.5">
+                          {colKey !== 'completed' && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onSelectPhaseFile(activePhaseState.filePath);
+                              }}
+                              disabled={!activePhaseState.filePath}
+                              className="mr-auto text-[10px] hover:underline text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 disabled:opacity-0"
+                            >
+                              Open File
+                            </button>
+                          )}
 
                           {onPreview && (colKey === 'completed' || (colKey === 'implementation' && ['awaiting_review', 'approved'].includes(activePhaseState.status))) && (
                             <button
@@ -655,9 +659,9 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                                 onPreview(feature.name);
                               }}
                               title="Run the project and see the changes"
-                              className="flex items-center gap-0.5 p-1 px-2 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900 text-[10px] font-semibold rounded transition"
+                              className="flex-1 flex items-center justify-center gap-1 py-1 px-2 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-900 text-zinc-600 dark:text-zinc-400 text-[10px] font-medium rounded transition"
                             >
-                              <MonitorPlay size={9} /> Preview
+                              <MonitorPlay size={10} /> Preview
                             </button>
                           )}
 
@@ -668,9 +672,22 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                                 onBrowserTest(feature.name);
                               }}
                               title="Run acceptance tests in the browser using Chrome extension"
-                              className="flex items-center gap-0.5 p-1 px-2 border border-teal-300 dark:border-teal-700 hover:bg-teal-50 dark:hover:bg-teal-900/30 text-teal-700 dark:text-teal-400 text-[10px] font-semibold rounded transition"
+                              className="flex-1 flex items-center justify-center gap-1 py-1 px-2 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-900 text-zinc-600 dark:text-zinc-400 text-[10px] font-medium rounded transition"
                             >
-                              <Globe size={9} /> Test in Browser
+                              <Globe size={10} /> Test
+                            </button>
+                          )}
+
+                          {onCommit && (colKey === 'completed' || (colKey === 'implementation' && ['awaiting_review', 'approved'].includes(activePhaseState.status))) && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onCommit(feature.name);
+                              }}
+                              title="Commit and push changes to GitHub"
+                              className="flex-1 flex items-center justify-center gap-1 py-1 px-2 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-900 text-zinc-600 dark:text-zinc-400 text-[10px] font-medium rounded transition"
+                            >
+                              <GitCommit size={10} /> Commit
                             </button>
                           )}
 
@@ -774,7 +791,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                               </button>
                             )
                           ) : (
-                            <span className="flex items-center gap-0.5 text-green-500 font-bold text-[10px] uppercase">
+                            <span className="w-full flex items-center justify-center gap-0.5 text-green-500 font-bold text-[10px] uppercase">
                               <CheckCircle2 size={10} /> Complete
                             </span>
                           )}

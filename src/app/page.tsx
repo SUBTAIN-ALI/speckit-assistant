@@ -8,18 +8,13 @@ const TerminalPanel = dynamic(() => import('@/components/TerminalPanel'), {
 });
 
 import {
-  WorkflowState,
   WorkflowPhase,
   AgentConfig,
   AgentType,
   PhaseStatus,
-  PersonaConfig,
-  PersonaId,
   PhaseState,
   isPhaseDone,
-  UserExpertiseProfile,
 } from '@/domain/models/types';
-import { DEFAULT_PERSONAS } from '@/domain/models/personas';
 import KanbanBoard from '@/components/KanbanBoard';
 import DagMap from '@/components/DagMap';
 import MarkdownEditor from '@/components/MarkdownEditor';
@@ -28,30 +23,23 @@ import { PersonaEditorModal } from '@/components/PersonaEditorModal';
 import { HumanReviewModal } from '@/components/HumanReviewModal';
 import AgentsPanel from '@/components/AgentsPanel';
 import McpPanel from '@/components/McpPanel';
-import ExtensionsPanel, { type ExtensionAction } from '@/components/ExtensionsPanel';
+import ExtensionsPanel from '@/components/ExtensionsPanel';
 import AboutModal, { APP_VERSION } from '@/components/AboutModal';
 import ExpertiseAssessmentModal from '@/components/ExpertiseAssessmentModal';
 import ChromeExtensionGuideModal from '@/components/ChromeExtensionGuideModal';
+import GitCommitModal from '@/components/GitCommitModal';
 import { BrowserTestStatus, BrowserTestResult } from '@/domain/models/browserTest';
 import ExecutionsView from '@/components/ExecutionsView';
 import RequirementsSection from '@/components/RequirementsSection';
 import WorkspaceSwitcher from '@/components/WorkspaceSwitcher';
 import PreviewPanel from '@/components/PreviewPanel';
 import ChatPanel from '@/chatbot/components/ChatPanel';
-import { isWorkflowState } from '@/lib/workflowState';
-import { AgentsFile, DEFAULT_AGENTS, toAgentConfig, activeAgent } from '@/domain/models/agents';
-import { McpFile, DEFAULT_MCP } from '@/domain/models/mcp';
-import { SpecAgentsFile, DEFAULT_SPEC_AGENTS } from '@/domain/models/specAgents';
-import { DevOpsAgentsFile, DEFAULT_DEVOPS_AGENTS } from '@/domain/models/devopsAgents';
-import { ExecutionRecord } from '@/domain/models/executions';
-import { InstalledExtension, BundledExtension } from '@/domain/models/extensions';
+import { activeAgent } from '@/domain/models/agents';
 import {
   Sun,
   Moon,
   Plus,
   Play,
-  RotateCcw,
-  Check,
   LayoutGrid,
   GitFork,
   X,
@@ -70,422 +58,58 @@ import {
   MessageSquare
 } from 'lucide-react';
 
-const PHASE_LABELS: Record<WorkflowPhase, string> = {
-  constitution: 'Constitution',
-  specification: 'Specification',
-  clarification: 'Clarification',
-  planning: 'Planning',
-  checklist: 'Checklist',
-  analyze: 'Analysis',
-  tasks: 'Tasks',
-  taskstoissues: 'Tasks to Issues',
-  implementation: 'Implementation',
-};
+import { useDarkMode } from './hooks/useDarkMode';
+import { useSidebar } from './hooks/useSidebar';
+import { useWorkflowState } from './hooks/useWorkflowState';
+import { usePhaseRunner } from './hooks/usePhaseRunner';
+import { useConfigStore } from './hooks/useConfigStore';
 
 export default function Dashboard() {
-  const [state, setStateRaw] = useState<WorkflowState | null>(null);
-  const setState = (next: unknown) => {
-    if (isWorkflowState(next)) setStateRaw(next);
-    else console.error('Ignoring invalid workflow state from the API:', next);
-  };
   const agentConsoleRef = React.useRef<AgentConsoleHandle | null>(null);
-  const [selectedFile, setSelectedFile] = useState<{ path: string; content: string } | null>(null);
-  // A short message above the editor (e.g. a checkbox that couldn't be ticked).
-  const [editorNotice, setEditorNotice] = useState<string | null>(null);
-  useEffect(() => {
-    if (!editorNotice) return;
-    const t = setTimeout(() => setEditorNotice(null), 6000);
-    return () => clearTimeout(t);
-  }, [editorNotice]);
-  
+
   const [viewMode, setViewMode] = useState<'kanban' | 'dag' | 'executions'>('kanban');
   const [section, setSection] = useState<'workflow' | 'requirements' | 'agents' | 'mcp' | 'extensions'>('workflow');
-  const [theme, setTheme] = useState<'light' | 'dark'>('light');
-  const [agentConfig, setAgentConfig] = useState<AgentConfig>({
-    agentType: 'claude',
-    customCommand: '',
-    agentPath: '',
-  });
-  const [agentsFile, setAgentsFile] = useState<AgentsFile>(DEFAULT_AGENTS);
-  const [mcpFile, setMcpFile] = useState<McpFile>(DEFAULT_MCP);
-  const [specAgentsFile, setSpecAgentsFile] = useState<SpecAgentsFile>(DEFAULT_SPEC_AGENTS);
-  const [devopsAgentsFile, setDevopsAgentsFile] = useState<DevOpsAgentsFile>(DEFAULT_DEVOPS_AGENTS);
-  const [executions, setExecutions] = useState<ExecutionRecord[]>([]);
-  const [runningDevOps, setRunningDevOps] = useState<string | null>(null);
-  const [extState, setExtState] = useState<{ available: boolean; installed: InstalledExtension[]; bundled: BundledExtension[] }>({ available: false, installed: [], bundled: [] });
-  const [prompt, setPrompt] = useState<string>('');
-  const [personaConfigs, setPersonaConfigs] = useState<PersonaConfig[]>(DEFAULT_PERSONAS);
-  const [editingPersona, setEditingPersona] = useState<PersonaConfig | null>(null);
-  const [auditingFeature, setAuditingFeature] = useState<{ name: string; phaseState: PhaseState } | null>(null);
-  const [showAbout, setShowAbout] = useState<boolean>(false);
-  const [showExpertiseAssessment, setShowExpertiseAssessment] = useState<boolean>(false);
-  const [browserTestFeature, setBrowserTestFeature] = useState<string | null>(null);
-  const [browserTestStatus, setBrowserTestStatus] = useState<BrowserTestStatus | null>(null);
-  const [browserTestResult, setBrowserTestResult] = useState<BrowserTestResult | null>(null);
-  const [newFeatureName, setNewFeatureName] = useState<string>('');
-  const [running, setRunning] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<'editor' | 'console' | 'terminal' | 'preview'>('editor');
   const [chatOpen, setChatOpen] = useState(false);
-  const [runningPhase, setRunningPhase] = useState<{ phase: WorkflowPhase; featureName: string | null } | null>(null);
-  // Remembers the phase that just finished so the user can type a follow-up
-  // reply in the console and re-run the same phase with their input as context.
-  const [lastPhase, setLastPhase] = useState<{ phase: WorkflowPhase; featureName: string | null } | null>(null);
-  const replyBuf = useRef('');
-  const [isEditorMaximized, setIsEditorMaximized] = useState<boolean>(false);
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
+  const [showAbout, setShowAbout] = useState(false);
+  const [isEditorMaximized, setIsEditorMaximized] = useState(false);
+  const [auditingFeature, setAuditingFeature] = useState<{ name: string; phaseState: PhaseState } | null>(null);
+  const [browserTestFeature, setBrowserTestFeature] = useState<string | null>(null);
+  const [commitFeature, setCommitFeature] = useState<string | null>(null);
+  const [browserTestStatus, setBrowserTestStatus] = useState<BrowserTestStatus | null>(null);
+  const [browserTestResult, setBrowserTestResult] = useState<BrowserTestResult | null>(null);
 
-  const handleToggleSidebar = () => {
-    setIsSidebarCollapsed(prev => {
-      const nextVal = !prev;
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('isSidebarCollapsed', String(nextVal));
-      }
-      return nextVal;
-    });
-  };
+  const { theme, handleToggleTheme } = useDarkMode();
+  const { isSidebarCollapsed, handleToggleSidebar } = useSidebar();
 
-  // Deep link into a section, e.g. the Zoom OAuth callback's ?section=requirements.
+  const configStore = useConfigStore({ agentConsoleRef });
+
+  const workflow = useWorkflowState(configStore.fetchExecutions);
+
+  // Deep link: navigate to section from URL params (e.g. ?section=requirements).
   useEffect(() => {
-    const s = new URLSearchParams(window.location.search).get('section');
-    if (s === 'requirements') setSection('requirements');
-  }, []);
+    if (workflow.deepLinkSection === 'requirements') setSection('requirements');
+  }, [workflow.deepLinkSection]);
 
+  const phaseRunner = usePhaseRunner({
+    agentConsoleRef,
+    state: workflow.state,
+    agentConfig: configStore.agentConfig,
+    personaConfigs: configStore.personaConfigs,
+    handleLoadFile: workflow.handleLoadFile,
+    handleSelectFeature: workflow.handleSelectFeature,
+    setState: workflow.setState,
+    fetchState: workflow.fetchState,
+  });
+
+  // Wire activeTab to 'console' when a phase starts running.
+  const prevRunning = useRef(phaseRunner.running);
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('isSidebarCollapsed');
-      if (saved === 'true') {
-        setIsSidebarCollapsed(true);
-      }
+    if (phaseRunner.running && !prevRunning.current) {
+      setActiveTab('console');
     }
-  }, []);
-
-  // Ref to track current file for SSE listener
-  const selectedFileRef = React.useRef(selectedFile);
-  useEffect(() => {
-    selectedFileRef.current = selectedFile;
-  }, [selectedFile]);
-
-  // Initialize
-  useEffect(() => {
-    fetchState();
-    fetchPersonas();
-    fetchAgents();
-    fetchMcp();
-    fetchSpecAgents();
-    fetchDevOpsAgents();
-    fetchExecutions();
-    fetchExtensions();
-
-    // Default to light mode
-    const root = window.document.documentElement;
-    root.classList.remove('dark');
-
-    // Live file observer
-    const eventSource = new EventSource('/api/state/watch');
-    eventSource.addEventListener('update', (event) => {
-      const payload = JSON.parse(event.data);
-      const newState = payload.state || payload;
-      const changedFile = payload.changedFile || null;
-
-      setState(newState);
-
-      // The executions feed is watched too; refresh it whenever the workspace changes.
-      if (!changedFile || changedFile.includes('executions.jsonl') || changedFile.includes('workflow-state.json')) {
-        fetchExecutions();
-      }
-
-      if (selectedFileRef.current && changedFile) {
-        const currentPath = selectedFileRef.current.path.replace(/\\/g, '/');
-        const normChangedFile = changedFile.replace(/\\/g, '/');
-        if (currentPath === normChangedFile) {
-          handleLoadFile(selectedFileRef.current.path);
-        }
-      }
-    });
-
-    return () => {
-      eventSource.close();
-    };
-  }, []);
-
-  const fetchState = async () => {
-    try {
-      const res = await fetch('/api/state');
-      const data = await res.json();
-      setState(data);
-      if (data && !data.expertiseProfile) {
-        setShowExpertiseAssessment(true);
-      }
-    } catch (err) {
-      console.error('Failed to fetch state:', err);
-    }
-  };
-
-  const fetchPersonas = async () => {
-    try {
-      const res = await fetch('/api/personas');
-      if (res.ok) {
-        const data = await res.json();
-        setPersonaConfigs(data);
-      }
-    } catch (err) {
-      console.error('Failed to fetch personas:', err);
-    }
-  };
-
-  const fetchAgents = async () => {
-    try {
-      const res = await fetch('/api/agents');
-      if (res.ok) setAgentsFile(await res.json());
-    } catch (err) {
-      console.error('Failed to fetch agents:', err);
-    }
-  };
-
-  const fetchMcp = async () => {
-    try {
-      const res = await fetch('/api/mcp');
-      if (res.ok) setMcpFile(await res.json());
-    } catch (err) {
-      console.error('Failed to fetch MCP servers:', err);
-    }
-  };
-
-  // Keep the runner's AgentConfig in sync with the active agent profile.
-  useEffect(() => {
-    const a = activeAgent(agentsFile);
-    if (a) setAgentConfig(toAgentConfig(a));
-  }, [agentsFile]);
-
-  const handleSaveAgents = async (file: AgentsFile) => {
-    setAgentsFile(file);
-    try {
-      await fetch('/api/agents', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(file),
-      });
-    } catch (err) {
-      console.error('Failed to save agents:', err);
-    }
-  };
-
-  const handleSaveMcp = async (file: McpFile) => {
-    setMcpFile(file);
-    try {
-      await fetch('/api/mcp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(file),
-      });
-    } catch (err) {
-      console.error('Failed to save MCP servers:', err);
-    }
-  };
-
-  const handleApplyMcp = async (agentId: string) => {
-    const res = await fetch('/api/mcp/apply', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ agentId }),
-    });
-    return res.json();
-  };
-
-  const fetchSpecAgents = async () => {
-    try {
-      const res = await fetch('/api/spec-agents');
-      if (res.ok) setSpecAgentsFile(await res.json());
-    } catch (err) {
-      console.error('Failed to fetch spec agents:', err);
-    }
-  };
-
-  const handleSaveSpecAgents = async (file: SpecAgentsFile) => {
-    setSpecAgentsFile(file);
-    try {
-      await fetch('/api/spec-agents', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(file),
-      });
-    } catch (err) {
-      console.error('Failed to save spec agents:', err);
-    }
-  };
-
-  const handleApplySpecAgents = async () => {
-    const res = await fetch('/api/spec-agents/apply', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(specAgentsFile),
-    });
-    return res.json();
-  };
-
-  const fetchDevOpsAgents = async () => {
-    try {
-      const res = await fetch('/api/devops-agents');
-      if (res.ok) setDevopsAgentsFile(await res.json());
-    } catch (err) {
-      console.error('Failed to fetch devops agents:', err);
-    }
-  };
-
-  const handleSaveDevOpsAgents = async (file: DevOpsAgentsFile) => {
-    setDevopsAgentsFile(file);
-    try {
-      await fetch('/api/devops-agents', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(file),
-      });
-    } catch (err) {
-      console.error('Failed to save devops agents:', err);
-    }
-  };
-
-  const fetchExecutions = async () => {
-    try {
-      const res = await fetch('/api/executions');
-      if (res.ok) setExecutions((await res.json()).executions || []);
-    } catch (err) {
-      console.error('Failed to fetch executions:', err);
-    }
-  };
-
-  const handleRunDevOps = async (agentId: string) => {
-    const agent = devopsAgentsFile.agents.find(a => a.id === agentId);
-    agentConsoleRef.current?.clear();
-    agentConsoleRef.current?.write(`\x1b[36m=== DevOps: ${agent?.label || agentId} ===\x1b[0m\r\n`);
-    setRunningDevOps(agentId);
-    setActiveTab('console');
-    try {
-      const response = await fetch('/api/devops/run', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ agentId, featureName: state?.activeFeatureName || null, agentConfig }),
-      });
-      // Non-SSE error responses (e.g. extension not installed) come back as JSON.
-      if (!response.ok || !response.body) {
-        const err = await response.json().catch(() => ({ error: 'Run failed' }));
-        agentConsoleRef.current?.write(`\r\n\x1b[31mError: ${err.error}\x1b[0m\r\n`);
-        return;
-      }
-      await consumeDevOpsStream(response);
-    } catch (err: any) {
-      agentConsoleRef.current?.write(`\r\n\x1b[31mExecution failed: ${err.message}\x1b[0m\r\n`);
-    } finally {
-      setRunningDevOps(null);
-      fetchExecutions();
-    }
-  };
-
-  const consumeDevOpsStream = async (response: Response) => {
-    const reader = response.body!.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value);
-      const lines = buffer.split('\n\n');
-      buffer = lines.pop() || '';
-      for (const line of lines) {
-        const dataLine = line.split('\n').find(l => l.startsWith('data: '));
-        if (!dataLine) continue;
-        const data = JSON.parse(dataLine.substring(6));
-        if (line.startsWith('event: log')) {
-          agentConsoleRef.current?.write(data.text);
-        } else if (line.startsWith('event: done')) {
-          agentConsoleRef.current?.write(`\r\n\x1b[32mDevOps run finished (exit ${data.exitCode}).\x1b[0m\r\n`);
-        } else if (line.startsWith('event: error')) {
-          agentConsoleRef.current?.write(`\r\n\x1b[31mError: ${data.message}\x1b[0m\r\n`);
-        }
-      }
-    }
-    fetchExecutions();
-  };
-
-  const fetchExtensions = async () => {
-    try {
-      const res = await fetch('/api/extensions');
-      if (res.ok) setExtState(await res.json());
-    } catch (err) {
-      console.error('Failed to fetch extensions:', err);
-    }
-  };
-
-  const handleExtensionAction = async (a: ExtensionAction) => {
-    const res = await fetch('/api/extensions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(a),
-    });
-    const data = await res.json();
-    setExtState(prev => ({
-      ...prev,
-      ...(Array.isArray(data.installed) ? { installed: data.installed } : {}),
-      ...(typeof data.available === 'boolean' ? { available: data.available } : {}),
-    }));
-    // The CLI just became available — refresh installed extensions too.
-    if (a.action === 'install-cli' && data.available) fetchExtensions();
-    return data;
-  };
-
-  const handleSavePersonasList = async (next: PersonaConfig[]) => {
-    setPersonaConfigs(next);
-    try {
-      await fetch('/api/personas', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(next),
-      });
-    } catch (err) {
-      console.error('Failed to save personas:', err);
-    }
-  };
-
-  const handleSavePersona = async (updated: PersonaConfig) => {
-    const next = personaConfigs.map(p => p.id === updated.id ? updated : p);
-    setPersonaConfigs(next);
-    setEditingPersona(null);
-
-    try {
-      await fetch('/api/personas', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(next)
-      });
-    } catch (err) {
-      console.error('Failed to save persona config:', err);
-    }
-  };
-
-  const handleToggleTheme = () => {
-    const root = window.document.documentElement;
-    if (theme === 'light') {
-      root.classList.add('dark');
-      setTheme('dark');
-    } else {
-      root.classList.remove('dark');
-      setTheme('light');
-    }
-  };
-
-  const handleSaveExpertise = async (profile: UserExpertiseProfile) => {
-    try {
-      await fetch('/api/expertise', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(profile),
-      });
-      setShowExpertiseAssessment(false);
-      fetchState();
-    } catch (err) {
-      console.error('Failed to save expertise profile:', err);
-    }
-  };
+    prevRunning.current = phaseRunner.running;
+  }, [phaseRunner.running]);
 
   const handleBrowserTest = async (serverUrl: string) => {
     if (!browserTestFeature) return;
@@ -497,7 +121,7 @@ export default function Dashboard() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           featureName: browserTestFeature,
-          agentConfig,
+          agentConfig: configStore.agentConfig,
           config: { serverUrl },
         }),
       });
@@ -532,469 +156,9 @@ export default function Dashboard() {
     }
   };
 
-  const handleSelectFeature = async (name: string) => {
-    try {
-      const res = await fetch('/api/state', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ activeFeatureName: name }),
-      });
-      const data = await res.json();
-      setState(data);
-
-      // Auto load the spec.md of the selected feature if it exists
-      const feature = data.features.find((f: any) => f.name === name);
-      const specPhase = feature?.phases.find((p: any) => p.phase === 'specification');
-      if (specPhase?.filePath) {
-        handleLoadFile(specPhase.filePath);
-      } else {
-        setSelectedFile(null);
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const handleCreateFeature = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newFeatureName.trim()) return;
-    try {
-      const res = await fetch('/api/feature', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newFeatureName.trim() }),
-      });
-      const data = await res.json();
-      setState(data);
-      setNewFeatureName('');
-      
-      // Select the newly created feature's spec phase
-      const specPath = `specs/${newFeatureName.trim()}/spec.md`;
-      setSelectedFile({ path: specPath, content: '' });
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const handleDeleteFeature = async (name: string) => {
-    if (!confirm(`Are you sure you want to delete feature "${name}"?`)) return;
-    try {
-      const res = await fetch('/api/feature', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name }),
-      });
-      const data = await res.json();
-      setState(data);
-      if (state?.activeFeatureName === name) {
-        setSelectedFile(null);
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const handleLoadFile = async (path: string) => {
-    try {
-      const res = await fetch(`/api/file?path=${encodeURIComponent(path)}`);
-      const data = await res.json();
-      setSelectedFile(data);
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const handleSaveFile = async (content: string) => {
-    if (!selectedFile) return;
-    try {
-      const res = await fetch('/api/file', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: selectedFile.path, content }),
-      });
-      const data = await res.json();
-      setSelectedFile({ path: selectedFile.path, content });
-      if (data.state) {
-        setState(data.state);
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  // Ticks a checkbox in the file being viewed (tasks.md, a checklist, …).
-  const handleToggleTask = async (lineIndex: number, checked: boolean) => {
-    const filePath = selectedFile?.path;
-    if (!filePath) return;
-    try {
-      const res = await fetch('/api/task', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filePath, lineIndex, checked }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setEditorNotice(data.error || 'Couldn’t update the checkbox.');
-      } else {
-        setState(data);
-      }
-      // Show the file as it is on disk now (ticked, or unchanged on error).
-      handleLoadFile(filePath);
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  // Consumes the SSE stream from a phase 'run' / 'run-gate' request, piping log
-  // chunks to the xterm console and applying the final state.
-  const consumePhaseStream = async (
-    response: Response,
-    phase: WorkflowPhase,
-    featureName: string | null
-  ) => {
-    const reader = response.body?.getReader();
-    if (!reader) {
-      setRunning(false);
-      setRunningPhase(null);
-      return;
-    }
-
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value);
-      const lines = buffer.split('\n\n');
-      buffer = lines.pop() || '';
-
-      for (const line of lines) {
-        if (line.startsWith('event: log')) {
-          const dataLine = line.split('\n').find(l => l.startsWith('data: '));
-          if (dataLine) {
-            const data = JSON.parse(dataLine.substring(6));
-            agentConsoleRef.current?.write(data.text);
-          }
-        } else if (line.startsWith('event: done')) {
-          const dataLine = line.split('\n').find(l => l.startsWith('data: '));
-          if (dataLine) {
-            const data = JSON.parse(dataLine.substring(6));
-            setState(data.state);
-            const targetFeature = featureName || data.state.activeFeatureName;
-            const feat = data.state.features.find((f: any) => f.name === targetFeature);
-            const activePhase = feat?.phases.find((p: any) => p.phase === phase);
-            if (activePhase?.filePath) {
-              handleLoadFile(activePhase.filePath);
-            }
-
-            setRunning(false);
-            setRunningPhase(null);
-            setPrompt('');
-
-            if (activePhase?.status === 'failed') {
-              const msg = activePhase.attention?.message ?? 'Phase failed.';
-              agentConsoleRef.current?.write(`\r\n\x1b[31m✗ ${msg}\x1b[0m\r\n`);
-              if (activePhase.attention?.question) {
-                agentConsoleRef.current?.write(`\r\n\x1b[33m  The agent asked: ${activePhase.attention.question}\x1b[0m\r\n`);
-              }
-              agentConsoleRef.current?.write('\r\n\x1b[36m  Type a message and press Enter to retry with context, or click Run on the card.\x1b[0m ');
-              setLastPhase({ phase, featureName: targetFeature });
-              replyBuf.current = '';
-            } else {
-              setLastPhase({ phase, featureName: targetFeature });
-              replyBuf.current = '';
-              agentConsoleRef.current?.write('\r\n\x1b[36m  Reply to continue (Enter to send):\x1b[0m ');
-            }
-          } else {
-            setRunning(false);
-            setRunningPhase(null);
-          }
-        } else if (line.startsWith('event: error')) {
-          const dataLine = line.split('\n').find(l => l.startsWith('data: '));
-          if (dataLine) {
-            const data = JSON.parse(dataLine.substring(6));
-            agentConsoleRef.current?.write(`\r\n\x1b[31m✗ Error: ${data.message}\x1b[0m\r\n`);
-            agentConsoleRef.current?.write('\r\n\x1b[36m  Fix the issue and click Run on the card to retry.\x1b[0m\r\n');
-          }
-          setRunning(false);
-          setRunningPhase(null);
-        }
-      }
-    }
-
-    fetchState();
-  };
-
-  // Quick build (Specification card): approve the spec, skip to Implementation, build now.
-  const handleQuickBuild = async (featureName: string) => {
-    agentConsoleRef.current?.clear();
-    setRunning(true);
-    setActiveTab('console');
-    setRunningPhase({ phase: 'implementation', featureName });
-    try {
-      if (state?.activeFeatureName !== featureName) await handleSelectFeature(featureName);
-      const response = await fetch('/api/phase', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'quick-build', phase: 'implementation', featureName, agentConfig, personas: personaConfigs }),
-      });
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        agentConsoleRef.current?.write(`\r\n\x1b[31mQuick build failed: ${data.error ?? response.status}\x1b[0m\r\n`);
-        setRunning(false);
-        setRunningPhase(null);
-        return;
-      }
-      await consumePhaseStream(response, 'implementation', featureName);
-    } catch (err: any) {
-      agentConsoleRef.current?.write(`\r\n\x1b[31mExecution failed: ${err.message}\x1b[0m\r\n`);
-      setRunning(false);
-      setRunningPhase(null);
-    }
-  };
-
-  // promptOverride: e.g. the user's answer to a question the agent stopped on.
-  const handleRunPhase = async (phase: WorkflowPhase, featureName: string | null, promptOverride?: string) => {
-    agentConsoleRef.current?.clear();
-    setRunning(true);
-    setLastPhase(null);
-    replyBuf.current = '';
-    setActiveTab('console');
-    setRunningPhase({ phase, featureName: featureName || state?.activeFeatureName || null });
-
-    try {
-      const response = await fetch('/api/phase', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'run',
-          phase,
-          featureName: featureName || state?.activeFeatureName,
-          agentConfig,
-          prompt: promptOverride ?? prompt,
-          // The implementation phase runs the persona review gate after the
-          // /speckit.implement step. Other phases ignore this field.
-          ...(phase === 'implementation' ? { personas: personaConfigs } : {})
-        })
-      });
-      await consumePhaseStream(response, phase, featureName);
-    } catch (err: any) {
-      agentConsoleRef.current?.write(`\r\n\x1b[31mExecution failed: ${err.message}\x1b[0m\r\n`);
-      setRunning(false);
-      setRunningPhase(null);
-    }
-  };
-
-  // Re-runs only the implementation review gate (personas), without re-running
-  // /speckit.implement.
-  const handleRerunGate = async (featureName: string | null) => {
-    const feature = featureName || state?.activeFeatureName || null;
-    agentConsoleRef.current?.clear();
-    setRunning(true);
-    setActiveTab('console');
-    setRunningPhase({ phase: 'implementation', featureName: feature });
-
-    try {
-      const response = await fetch('/api/phase', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'run-gate',
-          phase: 'implementation',
-          featureName: feature,
-          agentConfig,
-          personas: personaConfigs
-        })
-      });
-      await consumePhaseStream(response, 'implementation', feature);
-    } catch (err: any) {
-      agentConsoleRef.current?.write(`\r\n\x1b[31mExecution failed: ${err.message}\x1b[0m\r\n`);
-      setRunning(false);
-      setRunningPhase(null);
-    }
-  };
-
-  // Targeted fix: runs a minimal fix agent for the failed persona, then scoped re-review.
-  const handleFixAndRetry = async (featureName: string, failedPersonaId: PersonaId, fixInstruction: string) => {
-    agentConsoleRef.current?.clear();
-    setRunning(true);
-    setActiveTab('console');
-    setRunningPhase({ phase: 'implementation', featureName });
-
-    try {
-      const response = await fetch('/api/phase', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'fix',
-          phase: 'implementation',
-          featureName,
-          failedPersonaId,
-          fixInstruction,
-          agentConfig,
-          personas: personaConfigs,
-        })
-      });
-      await consumePhaseStream(response, 'implementation', featureName);
-    } catch (err: any) {
-      agentConsoleRef.current?.write(`\r\n\x1b[31mFix failed: ${err.message}\x1b[0m\r\n`);
-      setRunning(false);
-      setRunningPhase(null);
-    }
-  };
-
-  // The persona currently executing (if any), so terminal input/resize is routed
-  // to its PTY rather than the implement step's.
-  const activePersonaId = (): PersonaId | undefined => {
-    if (runningPhase?.phase !== 'implementation') return undefined;
-    const feat = state?.features.find(f => f.name === runningPhase.featureName);
-    const impl = feat?.phases.find(p => p.phase === 'implementation');
-    return impl?.personas?.find(p => p.status === 'running')?.id;
-  };
-
-  // Forward raw terminal keystrokes to the running agent's PTY so interactive
-  // prompts (e.g. the clarify Q&A picker) can be navigated with arrow keys.
-  // When no phase is running but one just finished, buffer keystrokes as a
-  // reply — pressing Enter re-runs the phase with the typed text as context.
-  const handleAgentInput = (data: string) => {
-    if (runningPhase) {
-      fetch('/api/phase', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'input',
-          phase: runningPhase.phase,
-          featureName: runningPhase.featureName,
-          text: data,
-          personaId: activePersonaId()
-        })
-      }).catch((err) => console.error('Failed to send input:', err));
-      return;
-    }
-
-    if (!lastPhase) return;
-
-    if (data === '\r' || data === '\n') {
-      const reply = replyBuf.current.trim();
-      if (!reply) return;
-      agentConsoleRef.current?.write('\r\n');
-      replyBuf.current = '';
-      const { phase, featureName } = lastPhase;
-      setLastPhase(null);
-      handleRunPhase(phase, featureName, reply);
-    } else if (data === '\x7f' || data === '\b') {
-      if (replyBuf.current.length > 0) {
-        replyBuf.current = replyBuf.current.slice(0, -1);
-        agentConsoleRef.current?.write('\b \b');
-      }
-    } else if (data >= ' ') {
-      replyBuf.current += data;
-      agentConsoleRef.current?.write(data);
-    }
-  };
-
-  // Keep the backend PTY sized to the visible terminal so wrapping and
-  // full-screen prompts render correctly.
-  const handleAgentResize = (cols: number, rows: number) => {
-    if (!runningPhase) return;
-    fetch('/api/phase', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        action: 'resize',
-        phase: runningPhase.phase,
-        featureName: runningPhase.featureName,
-        cols,
-        rows,
-        personaId: activePersonaId()
-      })
-    }).catch(() => {});
-  };
-
-  // Closes an interactive phase (Clarify) and sends it to review.
-  const handleFinishPhase = async (phase: WorkflowPhase, featureName: string | null) => {
-    try {
-      const res = await fetch('/api/phase', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'finish', phase, featureName: featureName || state?.activeFeatureName || null }),
-      });
-      const next = await res.json();
-      if (isWorkflowState(next)) setState(next);
-    } catch (err) {
-      console.error('Failed to finish phase', err);
-    } finally {
-      setRunning(false);
-      setRunningPhase(null);
-    }
-  };
-
-  const handleStopPhase = async (phase: WorkflowPhase, featureName: string | null) => {
-    try {
-      const targetFeature = featureName || state?.activeFeatureName || null;
-      const personaId = activePersonaId();
-      await fetch('/api/phase', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'stop',
-          phase,
-          featureName: targetFeature,
-          personaId
-        })
-      });
-      setRunning(false);
-      setRunningPhase(null);
-      fetchState();
-    } catch (err) {
-      console.error('Failed to stop phase:', err);
-    }
-  };
-
-  const handleApprovePhase = async (phase: WorkflowPhase, featureName: string | null) => {
-    try {
-      const res = await fetch('/api/phase', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'approve',
-          phase,
-          featureName: featureName || state?.activeFeatureName
-        })
-      });
-      const data = await res.json();
-      setState(data);
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const handleDiscardPhase = async (phase: WorkflowPhase, featureName: string | null) => {
-    try {
-      const res = await fetch('/api/phase', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'discard',
-          phase,
-          featureName: featureName || state?.activeFeatureName
-        })
-      });
-      const data = await res.json();
-      setState(data);
-      if (selectedFile?.path && selectedFile.path.includes(phase)) {
-        setSelectedFile(null);
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
   const handleCardDrop = async (featureName: string, targetColKey: string) => {
-    if (!state) return;
-    const feature = state.features.find(f => f.name === featureName);
+    if (!workflow.state) return;
+    const feature = workflow.state.features.find(f => f.name === featureName);
     if (!feature) return;
 
     const phasesOrder: WorkflowPhase[] = [
@@ -1002,8 +166,8 @@ export default function Dashboard() {
       'clarification',
       'planning',
       'checklist',
-      'analyze',
       'tasks',
+      'analyze',
       'taskstoissues',
       'implementation'
     ];
@@ -1021,12 +185,11 @@ export default function Dashboard() {
     const currentIndex = currentPhase === 'completed' ? phasesOrder.length : phasesOrder.indexOf(currentPhase);
     const targetIndex = targetColKey === 'completed' ? phasesOrder.length : phasesOrder.indexOf(targetColKey as WorkflowPhase);
 
-    if (state.activeFeatureName !== featureName) {
-      await handleSelectFeature(featureName);
+    if (workflow.state.activeFeatureName !== featureName) {
+      await workflow.handleSelectFeature(featureName);
     }
 
     if (targetIndex > currentIndex) {
-      // Progressing FORWARD
       for (let i = currentIndex; i < targetIndex; i++) {
         const phaseToApprove = phasesOrder[i];
         const res = await fetch('/api/phase', {
@@ -1039,15 +202,14 @@ export default function Dashboard() {
           })
         });
         const updatedState = await res.json();
-        setState(updatedState);
+        workflow.setState(updatedState);
       }
 
       if (targetColKey !== 'completed') {
         const targetPhase = targetColKey as WorkflowPhase;
-        handleRunPhase(targetPhase, featureName);
+        phaseRunner.handleRunPhase(targetPhase, featureName);
       }
     } else {
-      // Progressing BACKWARD
       const targetPhase = targetColKey as WorkflowPhase;
       const res = await fetch('/api/phase', {
         method: 'POST',
@@ -1059,36 +221,24 @@ export default function Dashboard() {
         })
       });
       const updatedState = await res.json();
-      setState(updatedState);
+      workflow.setState(updatedState);
 
-      if (selectedFile?.path && selectedFile.path.includes(targetPhase)) {
-        setSelectedFile(null);
+      if (workflow.selectedFile?.path && workflow.selectedFile.path.includes(targetPhase)) {
+        workflow.setSelectedFile(null);
       }
     }
   };
 
-  // Helper: Find current active phase for Prompt input box
-  const getActivePhaseForExecution = (): { phase: WorkflowPhase; label: string } => {
-    if (!state) return { phase: 'constitution', label: 'Constitution' };
-    if (state.constitutionPhase.status !== 'approved') {
-      return { phase: 'constitution', label: 'Constitution' };
-    }
-    const feat = state.features.find(f => f.name === state.activeFeatureName);
-    if (!feat) return { phase: 'specification', label: 'Specification' };
-    
-    for (const p of feat.phases) {
-      if (!isPhaseDone(p.status)) {
-        return { phase: p.phase, label: PHASE_LABELS[p.phase] };
-      }
-    }
-    return { phase: 'specification', label: 'Specification' };
+  const handleRunDevOpsWithTab = async (agentId: string) => {
+    setActiveTab('console');
+    await configStore.handleRunDevOps(agentId, workflow.state?.activeFeatureName || null);
   };
 
-  const activeExec = getActivePhaseForExecution();
+  const activeExec = phaseRunner.getActivePhaseForExecution();
 
   return (
-    <div className="flex flex-col h-screen bg-white dark:bg-black text-zinc-900 dark:text-zinc-50 overflow-hidden font-sans">
-      
+    <div className="flex flex-col h-dvh bg-white dark:bg-black text-zinc-900 dark:text-zinc-50 overflow-hidden font-sans">
+
       {/* Top Header Navigation */}
       <header className="flex justify-between items-center px-6 py-4 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-black z-10 shrink-0">
         <div className="flex items-center gap-3">
@@ -1104,7 +254,7 @@ export default function Dashboard() {
                 v{APP_VERSION}
               </button>
             </div>
-            <WorkspaceSwitcher busy={running || runningDevOps !== null} />
+            <WorkspaceSwitcher busy={phaseRunner.running || configStore.runningDevOps !== null} />
           </div>
         </div>
 
@@ -1160,8 +310,8 @@ export default function Dashboard() {
               {/* Review Portal / Audit Trigger */}
               <button
                 onClick={() => {
-                  const activeFeatureName = state?.activeFeatureName;
-                  const activeFeature = state?.features.find(f => f.name === activeFeatureName);
+                  const activeFeatureName = workflow.state?.activeFeatureName;
+                  const activeFeature = workflow.state?.features.find(f => f.name === activeFeatureName);
                   const implPhase = activeFeature?.phases.find(p => p.phase === 'implementation') || {
                     phase: 'implementation',
                     status: 'idle',
@@ -1184,20 +334,20 @@ export default function Dashboard() {
 
           {/* Expertise Profile Badge */}
           <button
-            onClick={() => setShowExpertiseAssessment(true)}
+            onClick={() => workflow.setShowExpertiseAssessment(true)}
             className="flex items-center gap-1.5 px-2 py-1.5 border border-zinc-200 dark:border-zinc-800 rounded-lg text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 transition hover:bg-zinc-100 dark:hover:bg-zinc-900 text-[11px]"
             title="Change expertise profile"
           >
             <span className={`w-2 h-2 rounded-full ${
-              !state?.expertiseProfile || state.expertiseProfile.mode === 'power-user' ? 'bg-green-500' :
-              state.expertiseProfile.mode === 'domain-transfer' ? 'bg-blue-500' :
-              state.expertiseProfile.mode === 'tech-shield' ? 'bg-amber-500' : 'bg-purple-500'
+              !workflow.state?.expertiseProfile || workflow.state.expertiseProfile.mode === 'power-user' ? 'bg-green-500' :
+              workflow.state.expertiseProfile.mode === 'domain-transfer' ? 'bg-blue-500' :
+              workflow.state.expertiseProfile.mode === 'tech-shield' ? 'bg-amber-500' : 'bg-purple-500'
             }`} />
             <span className="hidden sm:inline font-medium">
-              {!state?.expertiseProfile ? 'Set Profile' :
-                state.expertiseProfile.mode === 'power-user' ? 'Power User' :
-                state.expertiseProfile.mode === 'domain-transfer' ? 'Domain Transfer' :
-                state.expertiseProfile.mode === 'tech-shield' ? 'Business-Friendly' : 'Full Guidance'}
+              {!workflow.state?.expertiseProfile ? 'Set Profile' :
+                workflow.state.expertiseProfile.mode === 'power-user' ? 'Power User' :
+                workflow.state.expertiseProfile.mode === 'domain-transfer' ? 'Domain Transfer' :
+                workflow.state.expertiseProfile.mode === 'tech-shield' ? 'Business-Friendly' : 'Full Guidance'}
             </span>
           </button>
 
@@ -1216,45 +366,45 @@ export default function Dashboard() {
 
         {section === 'agents' && (
           <AgentsPanel
-            agentsFile={agentsFile}
-            mcpServers={mcpFile.servers}
-            personaConfigs={personaConfigs}
-            specAgentsFile={specAgentsFile}
-            devopsAgentsFile={devopsAgentsFile}
-            onSaveAgents={handleSaveAgents}
-            onSavePersonas={handleSavePersonasList}
-            onSaveSpecAgents={handleSaveSpecAgents}
-            onSaveDevOpsAgents={handleSaveDevOpsAgents}
-            onEditPersona={setEditingPersona}
-            onApply={handleApplyMcp}
-            onApplySpecAgents={handleApplySpecAgents}
+            agentsFile={configStore.agentsFile}
+            mcpServers={configStore.mcpFile.servers}
+            personaConfigs={configStore.personaConfigs}
+            specAgentsFile={configStore.specAgentsFile}
+            devopsAgentsFile={configStore.devopsAgentsFile}
+            onSaveAgents={configStore.handleSaveAgents}
+            onSavePersonas={configStore.handleSavePersonasList}
+            onSaveSpecAgents={configStore.handleSaveSpecAgents}
+            onSaveDevOpsAgents={configStore.handleSaveDevOpsAgents}
+            onEditPersona={configStore.setEditingPersona}
+            onApply={configStore.handleApplyMcp}
+            onApplySpecAgents={configStore.handleApplySpecAgents}
           />
         )}
 
         {section === 'requirements' && (
           <RequirementsSection
-            agentConfig={agentConfig}
-            agentLabel={activeAgent(agentsFile)?.name ?? agentConfig.agentType}
-            onStateChange={setState}
+            agentConfig={configStore.agentConfig}
+            agentLabel={activeAgent(configStore.agentsFile)?.name ?? configStore.agentConfig.agentType}
+            onStateChange={workflow.setState}
             onNavigate={setSection}
             onOpenFeature={async (name) => {
-              await fetchState();
+              await workflow.fetchState();
               setSection('workflow');
-              await handleSelectFeature(name);
+              await workflow.handleSelectFeature(name);
             }}
           />
         )}
 
         {section === 'mcp' && (
-          <McpPanel mcpFile={mcpFile} onSave={handleSaveMcp} />
+          <McpPanel mcpFile={configStore.mcpFile} onSave={configStore.handleSaveMcp} />
         )}
 
         {section === 'extensions' && (
           <ExtensionsPanel
-            available={extState.available}
-            installed={extState.installed}
-            bundled={extState.bundled}
-            onAction={handleExtensionAction}
+            available={configStore.extState.available}
+            installed={configStore.extState.installed}
+            bundled={configStore.extState.bundled}
+            onAction={configStore.handleExtensionAction}
           />
         )}
 
@@ -1281,9 +431,9 @@ export default function Dashboard() {
                 title="Click to view Features list"
               >
                 <Folder size={18} />
-                {state?.features && state.features.length > 0 && (
+                {workflow.state?.features && workflow.state.features.length > 0 && (
                   <span className="absolute -top-1 -right-1 bg-black dark:bg-white text-white dark:text-black text-[9px] w-4 h-4 rounded-full flex items-center justify-center font-bold">
-                    {state.features.length}
+                    {workflow.state.features.length}
                   </span>
                 )}
               </div>
@@ -1312,13 +462,13 @@ export default function Dashboard() {
               </div>
 
               {/* Create feature form */}
-              <form onSubmit={handleCreateFeature} className="p-4 border-b border-zinc-200 dark:border-zinc-800 shrink-0">
+              <form onSubmit={workflow.handleCreateFeature} className="p-4 border-b border-zinc-200 dark:border-zinc-800 shrink-0">
                 <div className="flex gap-2">
                   <input
                     type="text"
                     placeholder="New feature name..."
-                    value={newFeatureName}
-                    onChange={(e) => setNewFeatureName(e.target.value)}
+                    value={workflow.newFeatureName}
+                    onChange={(e) => workflow.setNewFeatureName(e.target.value)}
                     className="flex-1 px-3 py-1.5 bg-white dark:bg-black border border-zinc-200 dark:border-zinc-800 rounded-md text-xs outline-none focus:border-zinc-400 dark:focus:border-zinc-650"
                   />
                   <button
@@ -1335,19 +485,19 @@ export default function Dashboard() {
                 <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-400">
                   Features
                 </div>
-                {state?.features.map((feat) => {
-                  const isActive = state.activeFeatureName === feat.name;
+                {workflow.state?.features.map((feat) => {
+                  const isActive = workflow.state!.activeFeatureName === feat.name;
                   return (
                     <div
                       key={feat.name}
-                      onClick={() => handleSelectFeature(feat.name)}
+                      onClick={() => workflow.handleSelectFeature(feat.name)}
                       className={`group flex items-center justify-between px-2.5 py-2 rounded-md text-xs font-medium cursor-pointer transition ${isActive ? 'bg-zinc-100 dark:bg-zinc-900 text-zinc-950 dark:text-zinc-50' : 'text-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-950'}`}
                     >
                       <span className="truncate">{feat.name}</span>
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleDeleteFeature(feat.name);
+                          workflow.handleDeleteFeature(feat.name);
                         }}
                         className="p-1 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded text-zinc-400 hover:text-red-500 transition opacity-0 group-hover:opacity-100"
                       >
@@ -1356,13 +506,13 @@ export default function Dashboard() {
                     </div>
                   );
                 })}
-                {state?.features.length === 0 && (
+                {workflow.state?.features.length === 0 && (
                   <p className="text-xs text-zinc-400 italic p-2">No features created yet.</p>
                 )}
               </div>
 
               {/* Agent execution prompt box */}
-              <div className="p-4 border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-black shrink-0">
+              <div className="p-4 pb-6 border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-black shrink-0">
                 <div className="flex justify-between items-center mb-1">
                   <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">
                     Trigger Agent: {activeExec.label}
@@ -1371,16 +521,16 @@ export default function Dashboard() {
                 </div>
                 <textarea
                   placeholder="Refinements or prompts..."
-                  value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
-                  disabled={running || !state}
+                  value={phaseRunner.prompt}
+                  onChange={(e) => phaseRunner.setPrompt(e.target.value)}
+                  disabled={phaseRunner.running || !workflow.state}
                   className="w-full h-16 p-2 text-xs bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md outline-none resize-none disabled:opacity-50"
                 />
-                {running ? (
+                {phaseRunner.running ? (
                   <button
                     onClick={() => {
-                      if (runningPhase) {
-                        handleStopPhase(runningPhase.phase, runningPhase.featureName);
+                      if (phaseRunner.runningPhase) {
+                        phaseRunner.handleStopPhase(phaseRunner.runningPhase.phase, phaseRunner.runningPhase.featureName);
                       }
                     }}
                     className="w-full mt-2 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-md text-xs font-semibold transition flex items-center justify-center gap-1"
@@ -1389,8 +539,8 @@ export default function Dashboard() {
                   </button>
                 ) : (
                   <button
-                    onClick={() => handleRunPhase(activeExec.phase, null)}
-                    disabled={!state}
+                    onClick={() => phaseRunner.handleRunPhase(activeExec.phase, null)}
+                    disabled={!workflow.state}
                     className="w-full mt-2 py-1.5 bg-black dark:bg-white text-white dark:text-black rounded-md text-xs font-semibold hover:opacity-90 transition flex items-center justify-center gap-1 disabled:opacity-50"
                   >
                     <Play size={10} fill="currentColor" /> Run {activeExec.label}
@@ -1403,53 +553,54 @@ export default function Dashboard() {
 
         {/* Central visual panel (Kanban/DAG) and editor split */}
         <main className="flex-1 flex flex-col min-w-0 overflow-hidden bg-white dark:bg-black relative">
-          
+
           {/* Split Area: Top (Visual Board), Bottom (Editor or Console) */}
           <div className="flex-1 flex flex-col min-h-0">
             {/* Visualizer Area (Kanban / DAG Map) */}
             {!isEditorMaximized && (
               <div className="flex-1 min-h-[50%] relative">
-                {state ? (
+                {workflow.state ? (
                   viewMode === 'kanban' ? (
                     <KanbanBoard
-                      state={state}
-                      onRunPhase={handleRunPhase}
-                      onApprovePhase={handleApprovePhase}
-                      onDiscardPhase={handleDiscardPhase}
-                      onSelectFeature={handleSelectFeature}
-                      onDeleteFeature={handleDeleteFeature}
-                      onSelectPhaseFile={handleLoadFile}
+                      state={workflow.state}
+                      onRunPhase={phaseRunner.handleRunPhase}
+                      onApprovePhase={workflow.handleApprovePhase}
+                      onDiscardPhase={workflow.handleDiscardPhase}
+                      onSelectFeature={workflow.handleSelectFeature}
+                      onDeleteFeature={workflow.handleDeleteFeature}
+                      onSelectPhaseFile={(p) => p && workflow.handleLoadFile(p)}
                       onCardDrop={handleCardDrop}
-                      onRerunGate={handleRerunGate}
+                      onRerunGate={phaseRunner.handleRerunGate}
                       onOpenReview={(name, phaseState) => setAuditingFeature({ name, phaseState })}
-                      onStopPhase={handleStopPhase}
-                      onFinishPhase={handleFinishPhase}
-                      onAnswerPhase={(phase, feature, answer) => handleRunPhase(phase, feature, answer)}
-                      onQuickBuild={handleQuickBuild}
-                      onFixAndRetry={handleFixAndRetry}
+                      onStopPhase={phaseRunner.handleStopPhase}
+                      onFinishPhase={phaseRunner.handleFinishPhase}
+                      onAnswerPhase={(phase, feature, answer) => phaseRunner.handleRunPhase(phase, feature, answer)}
+                      onQuickBuild={phaseRunner.handleQuickBuild}
+                      onFixAndRetry={phaseRunner.handleFixAndRetry}
                       onBrowserTest={(feature) => {
                         setBrowserTestFeature(feature);
                         setBrowserTestResult(null);
                         setBrowserTestStatus(null);
                       }}
                       onPreview={async (feature) => {
-                        if (state?.activeFeatureName !== feature) await handleSelectFeature(feature);
+                        if (workflow.state?.activeFeatureName !== feature) await workflow.handleSelectFeature(feature);
                         setActiveTab('preview');
                       }}
+                      onCommit={(feature) => setCommitFeature(feature)}
                     />
                   ) : viewMode === 'dag' ? (
                     <DagMap
-                      state={state}
-                      onSelectFeature={handleSelectFeature}
-                      onSelectPhaseFile={handleLoadFile}
+                      state={workflow.state}
+                      onSelectFeature={workflow.handleSelectFeature}
+                      onSelectPhaseFile={(p) => p && workflow.handleLoadFile(p)}
                     />
                   ) : (
                     <ExecutionsView
-                      state={state}
-                      executions={executions}
-                      devopsAgents={devopsAgentsFile.agents}
-                      runningDevOps={runningDevOps}
-                      onRunDevOps={handleRunDevOps}
+                      state={workflow.state}
+                      executions={configStore.executions}
+                      devopsAgents={configStore.devopsAgentsFile.agents}
+                      runningDevOps={configStore.runningDevOps}
+                      onRunDevOps={handleRunDevOpsWithTab}
                       theme={theme}
                     />
                   )
@@ -1462,7 +613,7 @@ export default function Dashboard() {
             )}
 
             {/* Split panel: Content Editor, Terminal log console, or Full Terminal */}
-            <div className={`flex flex-col min-h-0 bg-white dark:bg-black transition-all duration-300 ${isEditorMaximized ? 'flex-1 h-full' : 'h-[40%] border-t border-zinc-200 dark:border-zinc-800'}`}>
+            <div className={`flex flex-col min-h-0 pb-2 bg-white dark:bg-black transition-all duration-300 ${isEditorMaximized ? 'flex-1 h-full' : 'h-[40%] border-t border-zinc-200 dark:border-zinc-800'}`}>
               {/* Tab Header for lower split */}
               <div className="flex justify-between items-center px-4 py-2 border-b border-zinc-150 dark:border-zinc-900 bg-zinc-50/70 dark:bg-zinc-950/20 shrink-0">
                 <div className="flex gap-4">
@@ -1476,7 +627,7 @@ export default function Dashboard() {
                     onClick={() => setActiveTab('console')}
                     className={`text-xs font-bold tracking-wide transition pb-1 border-b-2 ${activeTab === 'console' ? 'text-black dark:text-white border-black dark:border-white' : 'text-zinc-400 border-transparent'}`}
                   >
-                    AGENT RUN CONSOLE {running && <span className="inline-block w-2 h-2 rounded-full bg-blue-500 animate-pulse ml-1" />}
+                    AGENT RUN CONSOLE {phaseRunner.running && <span className="inline-block w-2 h-2 rounded-full bg-blue-500 animate-pulse ml-1" />}
                   </button>
                   <button
                     onClick={() => setActiveTab('terminal')}
@@ -1504,19 +655,19 @@ export default function Dashboard() {
               <div className="flex-1 min-h-0 overflow-hidden">
                 {activeTab === 'editor' && (
                   <div className="h-full p-3 bg-white dark:bg-black flex flex-col gap-2">
-                    {editorNotice && (
-                      <p role="alert" className="shrink-0 text-[11px] text-amber-700 dark:text-amber-400 bg-amber-500/10 rounded-md px-2 py-1">{editorNotice}</p>
+                    {workflow.editorNotice && (
+                      <p role="alert" className="shrink-0 text-[11px] text-amber-700 dark:text-amber-400 bg-amber-500/10 rounded-md px-2 py-1">{workflow.editorNotice}</p>
                     )}
                     <div className="flex-1 min-h-0">
                     <MarkdownEditor
-                      filePath={selectedFile?.path || null}
-                      initialContent={selectedFile?.content || null}
-                      onSave={handleSaveFile}
-                      onToggleTask={handleToggleTask}
-                      state={state}
+                      filePath={workflow.selectedFile?.path || null}
+                      initialContent={workflow.selectedFile?.content || null}
+                      onSave={workflow.handleSaveFile}
+                      onToggleTask={workflow.handleToggleTask}
+                      state={workflow.state}
                       isMaximized={isEditorMaximized}
                       onToggleMaximize={() => setIsEditorMaximized(!isEditorMaximized)}
-                      onSelectFile={handleLoadFile}
+                      onSelectFile={workflow.handleLoadFile}
                     />
                     </div>
                   </div>
@@ -1527,9 +678,9 @@ export default function Dashboard() {
                   <AgentConsole
                     ref={agentConsoleRef}
                     active={section === 'workflow' && activeTab === 'console'}
-                    running={running}
-                    onInput={handleAgentInput}
-                    onResize={handleAgentResize}
+                    running={phaseRunner.running}
+                    onInput={phaseRunner.handleAgentInput}
+                    onResize={phaseRunner.handleAgentResize}
                   />
                 </div>
                 {activeTab === 'terminal' && (
@@ -1539,7 +690,7 @@ export default function Dashboard() {
                 <div className={activeTab === 'preview' ? 'h-full' : 'hidden'}>
                   <PreviewPanel
                     active={section === 'workflow' && activeTab === 'preview'}
-                    featureName={state?.activeFeatureName ?? null}
+                    featureName={workflow.state?.activeFeatureName ?? null}
                   />
                 </div>
               </div>
@@ -1550,17 +701,20 @@ export default function Dashboard() {
       </div>
       <AboutModal isOpen={showAbout} onClose={() => setShowAbout(false)} />
       <ExpertiseAssessmentModal
-        isOpen={showExpertiseAssessment}
-        onClose={() => setShowExpertiseAssessment(false)}
-        onSave={handleSaveExpertise}
-        current={state?.expertiseProfile}
+        isOpen={workflow.showExpertiseAssessment}
+        onClose={() => workflow.setShowExpertiseAssessment(false)}
+        onSave={(profile) => configStore.handleSaveExpertise(profile, {
+          setShowExpertiseAssessment: workflow.setShowExpertiseAssessment,
+          fetchState: workflow.fetchState,
+        })}
+        current={workflow.state?.expertiseProfile}
       />
-      {editingPersona && (
+      {configStore.editingPersona && (
         <PersonaEditorModal
           isOpen={true}
-          onClose={() => setEditingPersona(null)}
-          persona={editingPersona}
-          onSave={handleSavePersona}
+          onClose={() => configStore.setEditingPersona(null)}
+          persona={configStore.editingPersona}
+          onSave={configStore.handleSavePersona}
         />
       )}
       {auditingFeature && (
@@ -1571,7 +725,7 @@ export default function Dashboard() {
           activePhaseState={auditingFeature.phaseState}
           theme={theme}
           onApprove={() => {
-            handleApprovePhase('implementation', auditingFeature.name);
+            workflow.handleApprovePhase('implementation', auditingFeature.name);
             setAuditingFeature(null);
           }}
         />
@@ -1584,6 +738,14 @@ export default function Dashboard() {
           onRunTest={handleBrowserTest}
           testStatus={browserTestStatus}
           testResult={browserTestResult}
+        />
+      )}
+
+      {commitFeature && (
+        <GitCommitModal
+          isOpen={true}
+          onClose={() => setCommitFeature(null)}
+          featureName={commitFeature}
         />
       )}
 

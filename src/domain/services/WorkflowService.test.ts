@@ -389,14 +389,17 @@ describe('WorkflowService', () => {
       expect(agentRunner.runPersona).not.toHaveBeenCalled();
     });
 
-    it('is not sent to review when every task was already ticked and it ticked nothing', async () => {
-      const impl = await run('- [x] task 1\n- [x] task 2', '**Do you want to proceed with implementation anyway? (yes/no)**\n');
-      expect(impl.status).toBe('idle');
-      expect(impl.attention).toEqual({
-        message: expect.stringContaining('All 2 tasks in tasks.md were already ticked'),
-        question: 'Do you want to proceed with implementation anyway? (yes/no)',
-      });
-      expect(agentRunner.runPersona).not.toHaveBeenCalled();
+    it('advances to review when every task was already ticked — goal state is reached', async () => {
+      const st: WorkflowState = JSON.parse(JSON.stringify(mockState));
+      const tasks = st.features[0].phases.find(p => p.phase === 'tasks')!;
+      tasks.content = '- [x] task 1\n- [x] task 2';
+      workspaceRepo.getWorkflowState.mockResolvedValue(st);
+      agentRunner.runPhase = vi.fn().mockImplementation(async (_w: any, _p: any, _f: any, _c: any, _u: any, onData: any) => { onData('All tasks complete.\n'); return 0; });
+      // No personas: test the shortfall logic, not the review gate.
+      const state = await service.runPhase('/workspace', 'implementation', 'auth', { agentType: 'claude' });
+      const impl = state.features[0].phases.find(p => p.phase === 'implementation')!;
+      expect(impl.status).toBe('awaiting_review');
+      expect(impl.attention).toBeUndefined();
     });
   });
 
@@ -432,7 +435,7 @@ describe('WorkflowService', () => {
       const state = await service.quickBuild('/workspace', 'auth', { agentType: 'claude' });
       const by = (ph: string) => state.features[0].phases.find(p => p.phase === ph)!;
       expect(by('specification').status).toBe('approved');
-      expect(['clarification', 'planning', 'checklist', 'analyze', 'tasks', 'taskstoissues'].map(p => by(p).status)).toEqual(Array(6).fill('skipped'));
+      expect(['clarification', 'planning', 'checklist', 'tasks', 'analyze', 'taskstoissues'].map(p => by(p).status)).toEqual(Array(6).fill('skipped'));
       expect(by('implementation')).toMatchObject({ status: 'awaiting_review', quickBuild: true });
 
       // No tasks.md yet → the quick-build instruction replaces /speckit.implement.

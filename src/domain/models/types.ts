@@ -4,8 +4,8 @@ export type WorkflowPhase =
   | 'clarification'
   | 'planning'
   | 'checklist'
-  | 'analyze'
   | 'tasks'
+  | 'analyze'
   | 'taskstoissues'
   | 'implementation';
 

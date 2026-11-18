@@ -6,9 +6,18 @@ import * as path from 'path';
 
 function runGit(cmd: string, cwd: string): string {
   try {
-    return execSync(cmd, { cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    return execSync(cmd, { cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
   } catch {
     return '';
+  }
+}
+
+function runGitStrict(cmd: string, cwd: string): { ok: boolean; stdout: string; stderr: string } {
+  try {
+    const stdout = execSync(cmd, { cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    return { ok: true, stdout, stderr: '' };
+  } catch (err: any) {
+    return { ok: false, stdout: '', stderr: (err.stderr || err.message || 'Unknown error').toString().trim() };
   }
 }
 
@@ -128,6 +137,84 @@ export async function GET(req: Request) {
     }
 
     return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
+}
+
+export async function POST(req: Request) {
+  try {
+    const body = await req.json();
+    const { action, message, files } = body as { action: string; message?: string; files?: string[] };
+    const workspacePath = getWorkspacePath();
+
+    if (!fs.existsSync(path.join(workspacePath, '.git'))) {
+      return NextResponse.json({ error: 'Git repository not found in workspace.' }, { status: 400 });
+    }
+
+    if (action === 'commit') {
+      if (!message || !message.trim()) {
+        return NextResponse.json({ error: 'Commit message is required.' }, { status: 400 });
+      }
+
+      // Stage files: if specific files provided, stage those; otherwise stage all
+      if (files && files.length > 0) {
+        for (const f of files) {
+          const res = runGitStrict(`git add -- "${f}"`, workspacePath);
+          if (!res.ok) {
+            return NextResponse.json({ error: `Failed to stage ${f}: ${res.stderr}` }, { status: 500 });
+          }
+        }
+      } else {
+        const res = runGitStrict('git add -A', workspacePath);
+        if (!res.ok) {
+          return NextResponse.json({ error: `Failed to stage files: ${res.stderr}` }, { status: 500 });
+        }
+      }
+
+      // Check if there's anything to commit
+      const staged = runGit('git diff --cached --name-only', workspacePath);
+      if (!staged) {
+        return NextResponse.json({ error: 'No changes to commit.' }, { status: 400 });
+      }
+
+      // Commit — use env var for message to avoid shell injection
+      const commitRes = runGitStrict(
+        `git commit -m "${message.replace(/"/g, '\\"')}"`,
+        workspacePath,
+      );
+      if (!commitRes.ok) {
+        return NextResponse.json({ error: `Commit failed: ${commitRes.stderr}` }, { status: 500 });
+      }
+
+      const hash = runGit('git log -1 --pretty=format:"%h"', workspacePath);
+      return NextResponse.json({ success: true, hash, message: commitRes.stdout });
+    }
+
+    if (action === 'push') {
+      const branch = runGit('git rev-parse --abbrev-ref HEAD', workspacePath) || 'HEAD';
+
+      // Check if remote exists
+      const remotes = runGit('git remote', workspacePath);
+      if (!remotes) {
+        return NextResponse.json({ error: 'No remote repository configured. Add a remote with: git remote add origin <url>' }, { status: 400 });
+      }
+
+      // Check if upstream is set
+      const upstream = runGit(`git config branch.${branch}.remote`, workspacePath);
+      const pushCmd = upstream
+        ? 'git push'
+        : `git push -u origin ${branch}`;
+
+      const pushRes = runGitStrict(pushCmd, workspacePath);
+      if (!pushRes.ok) {
+        return NextResponse.json({ error: `Push failed: ${pushRes.stderr}` }, { status: 500 });
+      }
+
+      return NextResponse.json({ success: true, branch, message: pushRes.stdout || pushRes.stderr || 'Pushed successfully.' });
+    }
+
+    return NextResponse.json({ error: 'Invalid action. Use "commit" or "push".' }, { status: 400 });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }

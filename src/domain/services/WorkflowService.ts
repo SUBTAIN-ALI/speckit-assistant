@@ -33,8 +33,8 @@ const FEATURE_PHASES: WorkflowPhase[] = [
   'clarification',
   'planning',
   'checklist',
-  'analyze',
   'tasks',
+  'analyze',
   'taskstoissues',
   'implementation'
 ];
@@ -45,8 +45,8 @@ const PHASE_LABELS: Partial<Record<WorkflowPhase, string>> = {
   clarification: 'Clarification',
   planning: 'Planning',
   checklist: 'Checklist',
-  analyze: 'Analysis',
   tasks: 'Tasks',
+  analyze: 'Analysis',
   taskstoissues: 'Tasks to Issues',
   implementation: 'Implementation',
 };
@@ -829,6 +829,9 @@ function implementationShortfall(
       : `Implement found no tasks in specs/${feature}/tasks.md, so nothing was built. Run Planning and Tasks first, or use Quick build from the Specification card.`;
   }
   if (after.done > before.done) return undefined;
+  // All tasks were already done before this run — the goal state is reached,
+  // don't block the card as idle.
+  if (after.total > 0 && after.done === after.total) return undefined;
   if (before.total > 0 && before.done === before.total) {
     return `All ${after.total} tasks in tasks.md were already ticked before this run, and it ticked nothing new. If the code doesn't exist, untick the tasks that aren't really done and run Implement again.`;
   }

@@ -13,7 +13,7 @@ const stateWith = (impl: Partial<PhaseState>): WorkflowState => ({
   features: [{
     name: '005-scheduled-orders',
     phases: [
-      ...(['specification', 'clarification', 'planning', 'checklist', 'analyze', 'tasks', 'taskstoissues'] as const).map(approved),
+      ...(['specification', 'clarification', 'planning', 'checklist', 'tasks', 'analyze', 'taskstoissues'] as const).map(approved),
       { phase: 'implementation', status: 'running', filePath: null, content: null, ...impl },
     ],
   }],
@@ -92,7 +92,7 @@ describe('KanbanBoard interactive Clarify', () => {
         phases: [
           approved('specification'),
           { phase: 'clarification', status: 'running', filePath: null, content: null },
-          ...(['planning', 'checklist', 'analyze', 'tasks', 'taskstoissues', 'implementation'] as const)
+          ...(['planning', 'checklist', 'tasks', 'analyze', 'taskstoissues', 'implementation'] as const)
             .map(p => ({ phase: p, status: 'idle' as const, filePath: null, content: null })),
         ],
       }],
@@ -143,7 +143,7 @@ describe('KanbanBoard: failed phase', () => {
         name: '003-checkout',
         phases: [
           { phase: 'specification', status: 'failed', filePath: null, content: null, attention: { message: 'Specification failed (exit code 1). Read the console output above for details, then click Run to retry.' } },
-          ...(['clarification', 'planning', 'checklist', 'analyze', 'tasks', 'taskstoissues', 'implementation'] as const)
+          ...(['clarification', 'planning', 'checklist', 'tasks', 'analyze', 'taskstoissues', 'implementation'] as const)
             .map(p => ({ phase: p, status: 'idle' as const, filePath: null, content: null })),
         ],
       }],
@@ -164,7 +164,7 @@ describe('KanbanBoard quick build', () => {
       name: '002-login',
       phases: [
         { phase: 'specification', status: 'awaiting_review', filePath: '/s.md', content: '' },
-        ...(['clarification', 'planning', 'checklist', 'analyze', 'tasks', 'taskstoissues', 'implementation'] as const)
+        ...(['clarification', 'planning', 'checklist', 'tasks', 'analyze', 'taskstoissues', 'implementation'] as const)
           .map(p => ({ phase: p, status: 'idle' as const, filePath: null, content: null })),
       ],
     }],
