@@ -34,6 +34,7 @@ import RequirementsSection from '@/components/RequirementsSection';
 import WorkspaceSwitcher from '@/components/WorkspaceSwitcher';
 import PreviewPanel from '@/components/PreviewPanel';
 import ChatPanel from '@/chatbot/components/ChatPanel';
+import GettingStartedGuide from '@/components/GettingStartedGuide';
 import { activeAgent } from '@/domain/models/agents';
 import {
   Sun,
@@ -85,6 +86,34 @@ export default function Dashboard() {
   const configStore = useConfigStore({ agentConsoleRef });
 
   const workflow = useWorkflowState(configStore.fetchExecutions);
+
+  // Onboarding: show the Getting Started guide for empty projects.
+  const [guideDismissed, setGuideDismissed] = useState(false);
+  const [workspaceSpecKit, setWorkspaceSpecKit] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    fetch('/api/workspace')
+      .then(r => r.json())
+      .then(data => {
+        if (data.current) setWorkspaceSpecKit(data.current.specKit);
+      })
+      .catch(() => {});
+  }, []);
+
+  const hasFeatures = (workflow.state?.features.length ?? 0) > 0;
+  const hasAgent = configStore.agentsFile.agents.some(a => a.enabled !== false);
+  const showGettingStarted = !guideDismissed && !hasFeatures && workflow.state !== null && workspaceSpecKit !== null;
+
+  const handleSetUpSpecKit = async () => {
+    const res = await fetch('/api/workspace/init', { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || 'Setup failed.');
+    }
+    setWorkspaceSpecKit(true);
+    const st = await fetch('/api/state').then(r => r.json()).catch(() => null);
+    if (st && !st.error) workflow.setState(st);
+  };
 
   // Deep link: navigate to section from URL params (e.g. ?section=requirements).
   useEffect(() => {
@@ -556,10 +585,19 @@ export default function Dashboard() {
 
           {/* Split Area: Top (Visual Board), Bottom (Editor or Console) */}
           <div className="flex-1 flex flex-col min-h-0">
-            {/* Visualizer Area (Kanban / DAG Map) */}
+            {/* Visualizer Area (Kanban / DAG Map / Getting Started) */}
             {!isEditorMaximized && (
               <div className="flex-1 min-h-[50%] relative">
-                {workflow.state ? (
+                {showGettingStarted && section === 'workflow' ? (
+                  <GettingStartedGuide
+                    hasFeatures={hasFeatures}
+                    hasSpecKit={workspaceSpecKit === true}
+                    hasAgent={hasAgent}
+                    onSetUpSpecKit={handleSetUpSpecKit}
+                    onNavigate={(s) => { setSection(s); }}
+                    onDismiss={() => setGuideDismissed(true)}
+                  />
+                ) : workflow.state ? (
                   viewMode === 'kanban' ? (
                     <KanbanBoard
                       state={workflow.state}

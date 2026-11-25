@@ -24,6 +24,9 @@ import { ProcessPreviewRunner } from './secondary/preview/ProcessPreviewRunner';
 import { PreviewService } from '../domain/services/PreviewService';
 import { ChatService } from '../domain/services/chat/ChatService';
 import { createChatLlmClient } from './secondary/llm/chat';
+import { FSEpsStore } from './secondary/eps/FSEpsStore';
+import { EpsMcpGateway } from './secondary/eps/EpsMcpGateway';
+import { EpsService } from '../domain/services/EpsService';
 
 const workspaceRepo = new FSWorkspaceRepository();
 const credentialStore = new FSCredentialStore();
@@ -46,7 +49,8 @@ const agentRunner = new ProcessAgentRunner(async (): Promise<Record<string, stri
 
 export const executionHistory = new FSExecutionHistory();
 export const extensionRepository = new FSExtensionRepository();
-export const workflowService = new WorkflowService(workspaceRepo, agentRunner, executionHistory, extensionRepository);
+export const workflowService = new WorkflowService(workspaceRepo, agentRunner, executionHistory, extensionRepository,
+  (ws, feature) => epsService.assertReady(ws, feature));
 export const agentRepository = new FSAgentRepository();
 export const mcpConfig = new FSMcpConfig();
 export const specAgentRepository = new FSSpecAgentRepository();
@@ -60,6 +64,8 @@ export const zoomMeetingSource = new ZoomMcpMeetingSource(force => zoomAuth.getA
 export const requirementsService = new RequirementsService(workspaceRepo, async (ws, feature) => {
   await workflowService.markStale(ws, 'specification', feature);
 });
+const epsStore = new FSEpsStore();
+export const epsService = new EpsService(epsStore, epsStore, new EpsMcpGateway(epsStore), requirementsService, workspaceRepo);
 // The bundled meetings extension, run by the active agent (the default engine).
 export const meetingAgentRunner = new MeetingAgentRunner(agentRepository, mcpConfig, extensionRepository, agentRunner);
 export const meetingImportService = new MeetingImportService(

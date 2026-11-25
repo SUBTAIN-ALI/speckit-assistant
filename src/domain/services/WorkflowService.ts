@@ -58,7 +58,8 @@ export class WorkflowService implements WorkflowUseCases {
     private executionHistory: ExecutionHistoryPort,
     // Lets the review gate check its personas' commands are installed before
     // spending a run on them. Without it, the gate doesn't check.
-    private extensions?: ExtensionRepositoryPort
+    private extensions?: ExtensionRepositoryPort,
+    private beforeRun?: (workspacePath: string, feature: string | null) => Promise<void>
   ) {}
 
   // Wraps an agent run with execution-history tracking: records a 'running' entry,
@@ -163,6 +164,7 @@ export class WorkflowService implements WorkflowUseCases {
     const targetFeature = featureName || state.activeFeatureName;
 
     // Set status to running
+    await this.beforeRun?.(workspacePath, targetFeature);
     this.setPhaseStatus(state, phase, targetFeature, 'running');
     const startingPhase = this.findPhase(state, phase, targetFeature);
     if (startingPhase) delete startingPhase.attention;
@@ -279,6 +281,7 @@ export class WorkflowService implements WorkflowUseCases {
     personas: PersonaConfig[],
     onData?: (text: string) => void
   ): Promise<WorkflowState> {
+    await this.beforeRun?.(workspacePath, featureName);
     const enabled = orderPersonas(personas.filter(p => p.enabled));
 
     const state = await this.workspaceRepo.getWorkflowState(workspacePath);
@@ -361,6 +364,7 @@ export class WorkflowService implements WorkflowUseCases {
     personas: PersonaConfig[],
     onData?: (text: string) => void
   ): Promise<WorkflowState> {
+    await this.beforeRun?.(workspacePath, featureName);
     const state = await this.workspaceRepo.getWorkflowState(workspacePath);
     const implPhase = this.findPhase(state, 'implementation', featureName);
     if (!implPhase?.personas) throw new Error('No implementation gate state found.');
@@ -513,6 +517,7 @@ export class WorkflowService implements WorkflowUseCases {
     agentConfig: AgentConfig,
     onData?: (text: string) => void
   ): Promise<{ exitCode: number }> {
+    await this.beforeRun?.(workspacePath, featureName);
     const { exitCode } = await this.recordRun(
       workspacePath,
       { kind: 'devops', feature: featureName, agentId: agent.id, label: agent.label, command: agent.command },
@@ -622,6 +627,7 @@ export class WorkflowService implements WorkflowUseCases {
     personas?: PersonaConfig[],
     onData?: (text: string) => void
   ): Promise<WorkflowState> {
+    await this.beforeRun?.(workspacePath, featureName);
     const state = await this.workspaceRepo.getWorkflowState(workspacePath);
     const feature = state.features.find(f => f.name === featureName);
     if (!feature) throw new Error(`Feature ${featureName} not found.`);

@@ -2,12 +2,10 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Send, Square, Trash2, Plus, ChevronDown, Maximize2, Minimize2, RefreshCw, Upload, AlertTriangle, Loader2 } from 'lucide-react';
-import { MarkdownPreview } from '../../components/MarkdownPreview';
+import { ChatMarkdownRenderer } from '../../components/ChatMarkdownRenderer';
 import { readSse } from '../../lib/sse';
 import { parseCitations, stripCitations } from '../domain/CitationParser';
-import { parseEvidence, hasEvidence } from '../domain/EvidenceParser';
 import { CitationView } from './CitationView';
-import { EvidenceBadge } from './EvidenceLabel';
 import { ConversationList } from './ConversationList';
 import { KnowledgeApprovalModal } from './KnowledgeApprovalModal';
 import type { ChatMessage, ConversationSummary, ChatState, KnowledgeChange, CitationSource } from '../domain/models';
@@ -21,6 +19,21 @@ type Props = {
 type MessageExt = ChatMessage & { superseded?: boolean };
 
 const KNOWLEDGE_PROPOSAL_RE = /<!-- KNOWLEDGE_PROPOSAL:\s*(\{[\s\S]*?\})\s*-->/;
+
+const EVIDENCE_MARKER_RE = /\[(Code Fact|Spec Intent|Review Outcome|General Knowledge|Uncertain)\]:?\s*/g;
+const SYSTEM_PROMPT_NOISE_RE = /\*{0,2}(Code Fact|Spec Intent|Review Outcome|General Knowledge|Uncertain)\*{0,2}\s*\**:?\s*(?:What (?:the inspected source code actually does|specifications or requirements say should happen|review\/test reports found)|Industry conventions or common patterns(?: \(always labeled\))?|When evidence is incomplete[^.\n]*\.?)\s*/gi;
+
+function stripAgentNoise(text: string): string {
+  return text
+    // Strip JSON control messages from agent APIs (OpenAI/Codex)
+    .replace(/\{"(?:type|exit_code|status)":[^\n]*?"(?:turn\.completed|item\.completed|response\.completed|response\.done|completed)"[^\n]*?\}/g, '')
+    // Strip usage/token JSON blocks
+    .replace(/\{"(?:input_tokens|output_tokens|usage)":[^\n]*?\}/g, '')
+    .replace(SYSTEM_PROMPT_NOISE_RE, '')
+    .replace(EVIDENCE_MARKER_RE, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
 
 function relativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -144,16 +157,28 @@ export const ChatPanel: React.FC<Props> = ({ active, expanded, onExpandToggle })
 
     try {
       const controller = new AbortController();
-      const res = await fetch('/api/chatbot/chat', {
+      let res = await fetch('/api/chatbot/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ conversationId: activeId, message: text }),
         signal: controller.signal,
       });
+      if (res.status === 503) {
+        await new Promise(r => setTimeout(r, 1500));
+        res = await fetch('/api/chatbot/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ conversationId: activeId, message: text }),
+          signal: controller.signal,
+        });
+      }
 
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: 'Chat request failed' }));
-        throw new Error(err.error || `HTTP ${res.status}`);
+        const err = await res.json().catch(() => ({}));
+        const fallback = res.status === 503
+          ? 'Service temporarily unavailable — the agent may still be starting. Please try again.'
+          : `API error: ${res.status} ${res.statusText}`;
+        throw new Error(err.error || fallback);
       }
 
       let newConvId = activeId;
@@ -239,9 +264,12 @@ export const ChatPanel: React.FC<Props> = ({ active, expanded, onExpandToggle })
     if (stopRef.current) stopRef.current();
   }, []);
 
-  const handleRegenerate = useCallback(() => {
+  const handleRegenerate = useCallback(async () => {
     const lastUser = lastUserMsgRef.current;
     if (!lastUser || chatState === 'investigating') return;
+    if (activeId) {
+      await fetch(`/api/chatbot/conversations/${activeId}/stop`, { method: 'POST' }).catch(() => {});
+    }
     setMessages(prev => {
       const next = [...prev];
       if (next.length > 0 && next[next.length - 1].role === 'assistant') {
@@ -250,7 +278,7 @@ export const ChatPanel: React.FC<Props> = ({ active, expanded, onExpandToggle })
       return next;
     });
     sendMessageText(lastUser);
-  }, [chatState, sendMessageText]);
+  }, [chatState, activeId, sendMessageText]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -337,8 +365,7 @@ export const ChatPanel: React.FC<Props> = ({ active, expanded, onExpandToggle })
 
   const renderMessage = (msg: MessageExt, i: number) => {
     const citations = msg.citations || parseCitations(msg.content);
-    const evidenceSpans = msg.role === 'assistant' && hasEvidence(msg.content) ? parseEvidence(msg.content) : [];
-    const displayContent = msg.role === 'assistant' ? stripCitations(msg.content) : msg.content;
+    const displayContent = msg.role === 'assistant' ? stripAgentNoise(stripCitations(msg.content)) : msg.content;
 
     return (
       <div key={msg.id || i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} ${msg.superseded ? 'opacity-40' : ''}`}>
@@ -351,22 +378,7 @@ export const ChatPanel: React.FC<Props> = ({ active, expanded, onExpandToggle })
         >
           {msg.role === 'assistant' ? (
             <div>
-              {evidenceSpans.length > 0 ? (
-                <div className="space-y-2">
-                  {evidenceSpans.map((span, si) => (
-                    <div key={si} className="flex items-start gap-2">
-                      <EvidenceBadge type={span.type} />
-                      <div className="prose prose-sm dark:prose-invert max-w-none flex-1 overflow-hidden break-words">
-                        <MarkdownPreview content={stripCitations(span.text)} />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="prose prose-sm dark:prose-invert max-w-none overflow-hidden break-words">
-                  <MarkdownPreview content={displayContent || (msg.status === 'streaming' ? '...' : '')} />
-                </div>
-              )}
+              <ChatMarkdownRenderer content={displayContent || (msg.status === 'streaming' ? '...' : '')} />
               {msg.status === 'streaming' && (
                 <span className="inline-block w-1.5 h-4 bg-zinc-400 dark:bg-zinc-500 animate-pulse ml-0.5 align-text-bottom rounded-sm" />
               )}

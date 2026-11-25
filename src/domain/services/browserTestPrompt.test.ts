@@ -12,7 +12,8 @@ const makeReq = (id: string, criteria: string[], status: 'accepted' | 'rejected'
   description: '',
   acceptanceCriteria: criteria,
   status,
-  priority: 'medium',
+  type: 'functional',
+  priority: 'should',
 });
 
 describe('buildBrowserTestSystemPrompt', () => {

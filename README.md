@@ -76,6 +76,7 @@ Spec Rabbit acts as the **Visual Dashboard** and **Command-Line Interface** to r
 * 🔄 **Conflict & Change Guard**: A live watcher (`chokidar` + SSE) detects external changes on disk and alerts you in case of editing conflicts.
 * 💾 **Persistent State**: Automatically remembers your active workspace inside `~/.speckit-assistant-config.json`.
 * 🎙️ **Meeting → Requirements → Features**: A **Requirements** section (and CLI) that imports a Zoom meeting or transcript, turns it into reviewable requirements, and creates Spec Kit features from the accepted ones. Runs through your active agent with the bundled **`spec-kit-meetings`** extension and a Zoom server in MCP Tools — see [Meeting → Requirements](#-meeting--requirements-zoom).
+* **EPS requirements integration**: Import selected released EPS requirements into the current project, synchronize progress and delivery evidence, and exchange clarification messages with the business owner. Existing specification and plan approvals remain in place. See [EPS setup and recovery](docs/eps-integration.md).
 
 ---
 

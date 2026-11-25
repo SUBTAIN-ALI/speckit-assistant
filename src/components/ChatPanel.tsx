@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Loader2, Send, Trash2 } from 'lucide-react';
-import { MarkdownPreview } from './MarkdownPreview';
+import { ChatMarkdownRenderer } from './ChatMarkdownRenderer';
 import { readSse } from '../lib/sse';
 
 type Message = {
@@ -133,9 +133,7 @@ export const ChatPanel: React.FC<Props> = ({ active }) => {
               }`}
             >
               {msg.role === 'assistant' ? (
-                <div className="prose prose-sm dark:prose-invert max-w-none">
-                  <MarkdownPreview content={msg.content || (streaming && i === messages.length - 1 ? '...' : '')} />
-                </div>
+                <ChatMarkdownRenderer content={msg.content || (streaming && i === messages.length - 1 ? '...' : '')} />
               ) : (
                 <span className="whitespace-pre-wrap">{msg.content}</span>
               )}

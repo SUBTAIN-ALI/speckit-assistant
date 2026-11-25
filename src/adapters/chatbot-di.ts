@@ -68,7 +68,11 @@ class SpecRabbitChatbotHost implements ChatbotHostPort {
     const donePromise = new Promise<number>(r => { resolveDone = r; });
     let stopped = false;
     const key = `chatbot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    let responseStarted = false;
+    const isClaude = agentConfig.agentType === 'claude';
+    const isJsonAgent = agentConfig.agentType === 'openai';
+    let responseStarted = !isClaude;
+    let preambleDone = false;
+    let jsonBuf = '';
 
     const exitPromise = chatbotAgentRunnerProcess.runCommand(
       workspacePath,
@@ -79,6 +83,36 @@ class SpecRabbitChatbotHost implements ChatbotHostPort {
       },
       agentConfig,
       (text: string) => {
+        if (!preambleDone) {
+          if (text.includes('Running:')) {
+            preambleDone = true;
+            return;
+          }
+        }
+
+        // Codex with --json outputs newline-delimited JSON events.
+        // Extract only the text content from agent_message items.
+        if (isJsonAgent) {
+          jsonBuf += text;
+          const jsonLines = jsonBuf.split('\n');
+          jsonBuf = jsonLines.pop() || '';
+
+          for (const jl of jsonLines) {
+            const trimmed = jl.trim();
+            if (!trimmed || !trimmed.startsWith('{')) continue;
+            try {
+              const obj = JSON.parse(trimmed);
+              if (obj.type === 'item.completed' && obj.item?.type === 'agent_message' && obj.item?.text) {
+                if (accumulated && !accumulated.endsWith('\n')) accumulated += '\n\n';
+                accumulated += obj.item.text;
+              }
+            } catch {
+              // Incomplete JSON or not JSON — ignore
+            }
+          }
+          return;
+        }
+
         const lines = text.split('\n');
         const filtered: string[] = [];
 
@@ -96,6 +130,20 @@ class SpecRabbitChatbotHost implements ChatbotHostPort {
           if (/^Process exited with code/.test(trimmed)) continue;
           if (/^[▶✓✗→]/.test(trimmed)) continue;
           if (/^Done\b|^✓ Done|^✗ Finished/.test(trimmed)) continue;
+          if (/^⏳ Agent is still working/.test(trimmed)) continue;
+
+          // Skip any stray JSON control messages
+          if (/^\{/.test(trimmed)) {
+            try {
+              const obj = JSON.parse(trimmed);
+              if (obj.exit_code !== undefined || obj.status === 'completed'
+                || obj.type === 'turn.completed' || obj.type === 'response.completed') {
+                continue;
+              }
+            } catch {
+              // Not valid JSON — pass through
+            }
+          }
 
           filtered.push(line);
         }
@@ -134,7 +182,11 @@ class SpecRabbitChatbotHost implements ChatbotHostPort {
       stream,
       stop: () => {
         stopped = true;
-        chatbotSessions.delete(key);
+        const child = chatbotSessions.get(key);
+        if (child) {
+          try { child.kill(); } catch { /* already exited */ }
+          chatbotSessions.delete(key);
+        }
       },
       isRunning: () => !stopped && chatbotSessions.has(key),
     };

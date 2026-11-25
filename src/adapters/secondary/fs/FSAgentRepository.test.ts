@@ -19,7 +19,7 @@ describe('FSAgentRepository', () => {
   it('returns DEFAULT_AGENTS when no file exists', async () => {
     const file = await repo.getAgents(ws);
     expect(file.agents.length).toBe(DEFAULT_AGENTS.agents.length);
-    expect(file.activeAgentId).toBe('claude-default');
+    expect(file.activeAgentId).toBe('codex-default');
   });
 
   it('persists and reloads agents as YAML', async () => {

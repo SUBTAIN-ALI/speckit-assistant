@@ -9,6 +9,7 @@ import { RequirementsPanel } from './RequirementsPanel';
 import { MeetingImportModal } from './MeetingImportModal';
 import { IntegrationsSettings } from './IntegrationsSettings';
 import { CreateFeaturesModal } from './CreateFeaturesModal';
+import { EpsPanel } from './EpsPanel';
 
 type Props = {
   agentConfig: AgentConfig;
@@ -38,7 +39,7 @@ export const RequirementsSection: React.FC<Props> = ({ agentConfig, agentLabel, 
   const [setId, setSetId] = useState<string | null>(null);
   const [view, setView] = useState<IntegrationsView | null>(null);
   const [readiness, setReadiness] = useState<Readiness | null>(null);
-  const [tab, setTab] = useState<'requirements' | 'settings'>('requirements');
+  const [tab, setTab] = useState<'requirements' | 'settings' | 'eps'>('requirements');
   const [doc, setDoc] = useState<RequirementsDoc | null>(null);
   const [loading, setLoading] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -226,6 +227,8 @@ export const RequirementsSection: React.FC<Props> = ({ agentConfig, agentLabel, 
   const secondary = `${btn} border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900`;
   const primary = `${btn} bg-black dark:bg-white text-white dark:text-black hover:opacity-90`;
 
+  if (tab === 'eps') return <EpsPanel onBack={() => { setTab('requirements'); void loadSets(); if (setId) void loadDoc(setId); }} onOpenList={id => { setTab('requirements'); void loadSets(); setSetId(id); void loadDoc(id); }} />;
+
   if (tab === 'settings') {
     return (
       <div className="w-full h-full overflow-y-auto px-8 py-6">
@@ -301,6 +304,7 @@ export const RequirementsSection: React.FC<Props> = ({ agentConfig, agentLabel, 
             ) : (
               <button onClick={() => setConfirmDelete(true)} className="p-2 rounded-lg text-zinc-400 hover:text-red-500 hover:bg-zinc-100 dark:hover:bg-zinc-900" title="Delete list" aria-label="Delete list"><Trash2 size={14} /></button>
             ))}
+            <button onClick={() => setTab('eps')} className={secondary}>EPS</button>
             <button onClick={() => setTab('settings')} className={secondary}><Settings size={14} /> Settings</button>
             <button
               onClick={() => { setRetryFeature(null); setCreateOpen(true); }}

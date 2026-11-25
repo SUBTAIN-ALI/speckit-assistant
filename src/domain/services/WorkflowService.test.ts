@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { Mocked } from 'vitest';
 import { WorkflowService } from './WorkflowService';
 import { WorkspaceRepositoryPort } from '../ports/out/WorkspaceRepositoryPort';
 import { AgentRunnerPort } from '../ports/out/AgentRunnerPort';
@@ -7,9 +8,9 @@ import { WorkflowState, FeatureWorkflow } from '../models/types';
 import { DEFAULT_PERSONAS } from '../models/personas';
 
 describe('WorkflowService', () => {
-  let workspaceRepo: vi.Mocked<WorkspaceRepositoryPort>;
-  let agentRunner: vi.Mocked<AgentRunnerPort>;
-  let executionHistory: vi.Mocked<ExecutionHistoryPort>;
+  let workspaceRepo: Mocked<WorkspaceRepositoryPort>;
+  let agentRunner: Mocked<AgentRunnerPort>;
+  let executionHistory: Mocked<ExecutionHistoryPort>;
   let service: WorkflowService;
 
   const mockState: WorkflowState = {

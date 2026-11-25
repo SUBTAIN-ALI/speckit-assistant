@@ -50,9 +50,11 @@ describe('Chatbot Module Isolation', () => {
       }
     }
 
-    // Allow specific shared utility imports: MarkdownPreview, readSse, sse helper
+    // Allow specific shared utility imports: MarkdownPreview, ChatMarkdownRenderer, readSse, sse helper
     const filtered = violations.filter(v =>
       !v.includes('components/MarkdownPreview') &&
+      !v.includes('components/ChatMarkdownRenderer') &&
+      !v.includes('components/chat/') &&
       !v.includes('lib/sse') &&
       !v.includes('adapters/primary/api/sse') &&
       !v.includes('adapters/primary/api/utils') &&
